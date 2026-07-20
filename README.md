@@ -103,6 +103,20 @@ scripts/compare_and_benchmark.sh \
     1 2 4 8 16 24
 ```
 
+If stock TelSeq has already been run on the same BAM with the same options,
+use its existing stdout file instead of running it again:
+
+```
+scripts/compare_and_benchmark.sh \
+    --reference-output /path/to/stock-result.tsv \
+    /path/to/new/telseq \
+    /path/to/sample.bam \
+    22 44
+```
+
+The benchmark does not run the expensive `samtools view -c` count by default.
+Set `TELSEQ_RUN_BAM_COUNT=1` only when that additional full BAM pass is wanted.
+
 The script stops at the first output mismatch by default and leaves all output,
 logs, checksums, and timings in a timestamped directory. Set
 `TELSEQ_STOP_ON_MISMATCH=0` to continue after a mismatch.

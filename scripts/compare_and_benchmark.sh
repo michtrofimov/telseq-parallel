@@ -3,8 +3,9 @@
 set -u
 
 usage() {
-    echo "Usage: $0 STOCK_TELSEQ NEW_TELSEQ SAMPLE_BAM [THREADS ...]" >&2
-    echo "Example: $0 ./stock-telseq ./src/Telseq/telseq sample.bam 1 2 4 8" >&2
+    echo "Usage:" >&2
+    echo "  $0 STOCK_TELSEQ NEW_TELSEQ SAMPLE_BAM [THREADS ...]" >&2
+    echo "  $0 --reference-output STOCK_OUTPUT NEW_TELSEQ SAMPLE_BAM [THREADS ...]" >&2
 }
 
 if [ "$#" -lt 3 ]; then
@@ -12,23 +13,45 @@ if [ "$#" -lt 3 ]; then
     exit 2
 fi
 
-stock_telseq=$1
-new_telseq=$2
-bam=$3
-shift 3
+reference_mode=executable
+case "$1" in
+    --reference-output)
+        if [ "$#" -lt 4 ]; then
+            usage
+            exit 2
+        fi
+        reference_mode=file
+        reference_output=$2
+        new_telseq=$3
+        bam=$4
+        shift 4
+        ;;
+    *)
+        stock_telseq=$1
+        new_telseq=$2
+        bam=$3
+        shift 3
+        ;;
+esac
 
 if [ "$#" -eq 0 ]; then
     set -- 1 2 4 8 16 24
 fi
 
-for required_file in "$stock_telseq" "$new_telseq" "$bam"; do
+if [ "$reference_mode" = "file" ]; then
+    reference_source=$reference_output
+else
+    reference_source=$stock_telseq
+fi
+
+for required_file in "$reference_source" "$new_telseq" "$bam"; do
     if [ ! -e "$required_file" ]; then
         echo "Error: not found: $required_file" >&2
         exit 2
     fi
 done
 
-if [ ! -x "$stock_telseq" ]; then
+if [ "$reference_mode" = "executable" ] && [ ! -x "$stock_telseq" ]; then
     echo "Error: stock TelSeq is not executable: $stock_telseq" >&2
     exit 2
 fi
@@ -63,7 +86,8 @@ environment_log="$output_dir/environment.txt"
     echo "date: $(date)"
     echo "host: $(hostname 2>/dev/null || echo unknown)"
     echo "system: $(uname -a)"
-    echo "stock: $stock_telseq"
+    echo "reference mode: $reference_mode"
+    echo "reference: $reference_source"
     echo "new: $new_telseq"
     echo "bam: $bam"
     echo "threads: $*"
@@ -77,8 +101,13 @@ environment_log="$output_dir/environment.txt"
         echo
         echo "samtools quickcheck:"
         samtools quickcheck -v "$bam" 2>&1
-        echo "samtools physical alignment count:"
-        samtools view -c "$bam" 2>&1
+        if [ "${TELSEQ_RUN_BAM_COUNT:-0}" = "1" ]; then
+            echo "samtools physical alignment count:"
+            samtools view -c "$bam" 2>&1
+        else
+            echo "samtools physical alignment count: skipped"
+            echo "Set TELSEQ_RUN_BAM_COUNT=1 to enable the full BAM count."
+        fi
     fi
 } > "$environment_log"
 
@@ -115,11 +144,21 @@ run_timed() {
 printf 'run\texit_status\treal_seconds\tuser_seconds\tsys_seconds\tstdout_sha256\n' \
     > "$summary"
 
-echo "Running stock TelSeq..."
-if ! run_timed stock "$stock_telseq" "$bam"; then
-    echo "Error: stock TelSeq failed. See $output_dir/stock.stderr" >&2
-    echo "Results: $output_dir"
-    exit 1
+if [ "$reference_mode" = "file" ]; then
+    reference_stdout="$output_dir/reference.stdout"
+    cp "$reference_output" "$reference_stdout"
+    reference_checksum=$(checksum_file "$reference_stdout")
+    printf 'reference\t0\tNA\tNA\tNA\t%s\n' "$reference_checksum" \
+        >> "$summary"
+    echo "Using existing stock output: $reference_output"
+else
+    echo "Running stock TelSeq..."
+    if ! run_timed stock "$stock_telseq" "$bam"; then
+        echo "Error: stock TelSeq failed. See $output_dir/stock.stderr" >&2
+        echo "Results: $output_dir"
+        exit 1
+    fi
+    reference_stdout="$output_dir/stock.stdout"
 fi
 
 stop_on_mismatch=${TELSEQ_STOP_ON_MISMATCH:-1}
@@ -144,11 +183,11 @@ for threads in "$@"; do
         continue
     fi
 
-    if cmp -s "$output_dir/stock.stdout" "$output_dir/${label}.stdout"; then
-        echo "PASS: -t $threads output is byte-identical to stock"
+    if cmp -s "$reference_stdout" "$output_dir/${label}.stdout"; then
+        echo "PASS: -t $threads output is byte-identical to the reference"
     else
-        echo "FAIL: -t $threads output differs from stock" >&2
-        diff -u "$output_dir/stock.stdout" "$output_dir/${label}.stdout" \
+        echo "FAIL: -t $threads output differs from the reference" >&2
+        diff -u "$reference_stdout" "$output_dir/${label}.stdout" \
             > "$output_dir/${label}.diff" || true
         echo "Diff: $output_dir/${label}.diff" >&2
         had_failure=1
