@@ -121,6 +121,9 @@ The script stops at the first output mismatch by default and leaves all output,
 logs, checksums, and timings in a timestamped directory. Set
 `TELSEQ_STOP_ON_MISMATCH=0` to continue after a mismatch.
 
+See [TESTING.md](TESTING.md) for the reproducible 64-reference synthetic test
+and its expected results.
+
 ##### Analyse one or more BAMs by specifying BAM file path as command line arguments.
 `telseq a.bam b.bam`
 

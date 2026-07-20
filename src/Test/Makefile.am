@@ -1,0 +1,3 @@
+noinst_PROGRAMS = generate_parallel_fixture
+
+generate_parallel_fixture_SOURCES = generate_parallel_fixture.cpp

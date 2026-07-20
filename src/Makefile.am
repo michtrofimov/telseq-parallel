@@ -1,2 +1,2 @@
 AUTOMAKE_OPTIONS = foreign
-SUBDIRS =  Util Telseq
+SUBDIRS = Util Telseq Test
