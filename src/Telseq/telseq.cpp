@@ -9,6 +9,10 @@
 #include <sstream>
 #include <set>
 #include <map>
+#include <atomic>
+#include <exception>
+#include <mutex>
+#include <thread>
 #include <unistd.h>
 
 #include "telseq.h"
@@ -49,6 +53,8 @@ static const char *TELSEQ_USAGE_MESSAGE =
 "   -m                       merge read groups by taking a weighted average across read groups of a sample, weighted by \n"
 "                            the total number of reads in read group. Default is to output each readgroup separately.\n"
 "   -u                       ignore read groups. Treat all reads in BAM as if they were from a same read group.\n"
+"   -t, --threads=INT        number of threads for one coordinate-sorted, indexed BAM. default = 1.\n"
+"                            Values greater than 1 reserve one compatibility scanner; remaining workers use the index.\n"
 "   -k                       threshold of the amount of TTAGGG/CCCTAA repeats in read for a read to be considered telomeric. default = 7.\n"
 "\nTesting functions\n------------\n"
 "   -r                       read length. default = 100\n"
@@ -70,6 +76,7 @@ namespace opt
     static bool mergerg = false;
     static bool ignorerg = false;
     static bool onebam = false; // whether to consider all bams as one bam
+    static unsigned int threads = 1;
     static int tel_k= ScanParameters::TEL_MOTIF_CUTOFF;
     static std::string unknown = "UNKNOWN";
     static std::string PATTERN;
@@ -77,7 +84,7 @@ namespace opt
 
 }
 
-static const char* shortopts = "f:o:k:z:e:r:p:Hhvmuw";
+static const char* shortopts = "f:o:k:z:e:r:p:t:Hhvmuw";
 
 enum { OPT_HELP = 1, OPT_VERSION };
 
@@ -85,6 +92,7 @@ static const struct option longopts[] = {
 	{ "bamlist",		optional_argument, NULL, 'f' },
     { "output-dir",		optional_argument, NULL, 'o' },
     { "exomebed",		optional_argument, NULL, 'e' },
+    { "threads",            required_argument, NULL, 't' },
     { "help",               no_argument,       NULL, OPT_HELP },
     { "version",            no_argument,       NULL, OPT_VERSION },
     { NULL, 0, NULL, 0 }
@@ -107,6 +115,406 @@ void add_results(ScanResults& x, ScanResults& y){
         x.gccounts[k] += y.gccounts[k];
     }
 
+}
+
+typedef std::map<std::string, ScanResults> ResultMap;
+typedef std::map<std::string, std::vector<range>::iterator> ExomeSearchHints;
+
+struct ReferenceTask
+{
+    int refID;
+    int refLength;
+};
+
+static std::mutex parallelLogMutex;
+
+// This reducer is intentionally separate from add_results().  The latter is
+// part of the legacy -w path and its behaviour is kept unchanged for output
+// compatibility with the original TelSeq release.
+static void add_thread_results(ScanResults& destination, const ScanResults& source)
+{
+    destination.numTotal += source.numTotal;
+    destination.numMapped += source.numMapped;
+    destination.numDuplicates += source.numDuplicates;
+    destination.n_exreadsExcluded += source.n_exreadsExcluded;
+    destination.n_exreadsChrUnmatched += source.n_exreadsChrUnmatched;
+    destination.n_totalunfiltered += source.n_totalunfiltered;
+
+    for (std::size_t i = 0; i < destination.telcounts.size(); ++i) {
+        destination.telcounts[i] += source.telcounts[i];
+    }
+    for (std::size_t i = 0; i < destination.gccounts.size(); ++i) {
+        destination.gccounts[i] += source.gccounts[i];
+    }
+}
+
+static void print_parallel_warning(const std::string& message)
+{
+    std::lock_guard<std::mutex> lock(parallelLogMutex);
+    std::cerr << message;
+}
+
+// Scan one alignment into a worker-local result map. This mirrors the body of
+// the original serial scan loop, but never touches shared counters.
+static void scan_alignment_parallel(
+    BamTools::BamAlignment& record,
+    const bool rggroups,
+    const bool isExome,
+    ResultMap& resultmap,
+    ExomeSearchHints& lastfound,
+    uint64_t& nprocessed)
+{
+    std::string tag = opt::unknown;
+    if (rggroups) {
+        if (record.HasTag("RG")) {
+            record.GetTag("RG", tag);
+        } else {
+            std::ostringstream message;
+            message << "can't find RG tag for read at position {"
+                    << record.RefID << ":" << record.Position << "}\n"
+                    << "skip this read\n";
+            print_parallel_warning(message.str());
+            return;
+        }
+    }
+
+    ResultMap::iterator result = resultmap.find(tag);
+    if (result == resultmap.end()) {
+        std::ostringstream message;
+        message << "RG tag {" << tag << "} for read at position {"
+                << record.RefID << ":" << record.Position
+                << "} doesn't exist in BAM header.";
+        print_parallel_warning(message.str());
+        return;
+    }
+
+    if (isExome) {
+        range alignmentRange;
+        alignmentRange.first = record.Position;
+        alignmentRange.second = record.Position + record.Length;
+        const std::string chrm = refID2Name(record.RefID);
+
+        if (chrm != "-1") {
+            std::map<std::string, std::vector<range> >::iterator chromosome =
+                opt::exomebed.find(chrm);
+            if (chromosome == opt::exomebed.end()) {
+                result->second.n_exreadsChrUnmatched += 1;
+            } else {
+                const std::vector<range>::iterator end = chromosome->second.end();
+                ExomeSearchHints::iterator hint = lastfound.find(chrm);
+                if (hint == lastfound.end()) {
+                    lastfound[chrm] = chromosome->second.begin();
+                }
+                std::vector<range>::iterator found =
+                    searchRange(lastfound[chrm], end, alignmentRange);
+                if (found != end) {
+                    result->second.n_exreadsExcluded += 1;
+                    lastfound[chrm] = found;
+                    return;
+                }
+            }
+        }
+    }
+
+    result->second.numTotal += 1;
+
+    if (record.IsMapped()) {
+        result->second.numMapped += 1;
+    }
+    if (record.IsDuplicate()) {
+        result->second.numDuplicates += 1;
+    }
+
+    const double gc = calcGC(record.QueryBases);
+    const int ptn_count =
+        countMotif(record.QueryBases, opt::PATTERN, opt::PATTERN_REV);
+
+    if (ptn_count > ScanParameters::TEL_MOTIF_N - 1) {
+        return;
+    }
+    result->second.telcounts[ptn_count] += 1;
+
+    if (gc >= ScanParameters::GC_LOWERBOUND &&
+        gc <= ScanParameters::GC_UPPERBOUND) {
+        const int idx = floor(
+            (gc - ScanParameters::GC_LOWERBOUND) / ScanParameters::GC_BINSIZE);
+        assert(idx >= 0 && idx <= ScanParameters::GC_BIN_N - 1);
+        if (idx > ScanParameters::GC_BIN_N - 1) {
+            std::ostringstream message;
+            message << nprocessed << " GC:{" << gc << "} telcounts:{"
+                    << ptn_count << "} GC bin index out of bound:" << idx
+                    << "\n";
+            print_parallel_warning(message.str());
+            return;
+        }
+        result->second.gccounts[idx] += 1;
+    }
+
+    nprocessed += 1;
+}
+
+static bool header_is_coordinate_sorted(const std::string& headerText)
+{
+    std::istringstream headerStream(headerText);
+    std::string line;
+    while (std::getline(headerStream, line)) {
+        if (line.compare(0, 3, "@HD") == 0) {
+            return line.find("\tSO:coordinate") != std::string::npos;
+        }
+    }
+    return false;
+}
+
+static bool scan_bam_parallel(
+    const std::string& bamPath,
+    BamTools::BamReader& setupReader,
+    const ResultMap& emptyResultMap,
+    const bool rggroups,
+    const bool isExome,
+    ResultMap& combinedResults,
+    uint64_t& totalScanned)
+{
+    if (!header_is_coordinate_sorted(setupReader.GetHeaderText())) {
+        std::cerr << "Error: -t > 1 requires a BAM whose header declares "
+                  << "SO:coordinate.\n";
+        return false;
+    }
+
+    if (!setupReader.LocateIndex()) {
+        std::cerr << "Error: -t > 1 requires a readable BAM index next to "
+                  << bamPath << ".\n";
+        std::cerr << "BamTools: " << setupReader.GetErrorString() << "\n";
+        return false;
+    }
+
+    const BamTools::RefVector references = setupReader.GetReferenceData();
+    if (references.empty()) {
+        std::cerr << "Error: indexed parallel scan found no references in "
+                  << bamPath << ".\n";
+        return false;
+    }
+
+    std::vector<ReferenceTask> tasks;
+    tasks.reserve(references.size());
+    for (int refID = 0;
+         refID < static_cast<int>(references.size());
+         ++refID) {
+        ReferenceTask task;
+        task.refID = refID;
+        task.refLength = references[refID].RefLength;
+        tasks.push_back(task);
+    }
+
+    // Long references start first. Workers fetch another reference as soon as
+    // they finish, which balances the small/decoy contigs without splitting a
+    // chromosome at overlapping region boundaries.
+    std::sort(
+        tasks.begin(),
+        tasks.end(),
+        [](const ReferenceTask& left, const ReferenceTask& right) {
+            return left.refLength > right.refLength;
+        });
+
+    // One thread performs a compatibility pass for no-coordinate records and
+    // the legacy final-record contribution. The remaining threads process
+    // mapped reference tasks through the index.
+    const std::size_t mappedWorkerCount =
+        std::min<std::size_t>(opt::threads - 1, tasks.size());
+    std::vector<ResultMap> workerResults(mappedWorkerCount, emptyResultMap);
+    std::vector<uint64_t> workerScanned(mappedWorkerCount, 0);
+    std::vector<uint64_t> workerProcessed(mappedWorkerCount, 0);
+    std::vector<std::string> workerErrors(mappedWorkerCount);
+    ResultMap tailResults = emptyResultMap;
+    uint64_t tailScanned = 0;
+    uint64_t tailProcessed = 0;
+    uint64_t tailInspected = 0;
+    std::string tailError;
+    std::atomic<std::size_t> nextTask(0);
+    std::atomic<bool> failed(false);
+    std::vector<std::thread> workers;
+    workers.reserve(mappedWorkerCount);
+
+    std::cerr << "Indexed parallel scan using " << mappedWorkerCount
+              << " mapped-reference workers and 1 no-coordinate scanner "
+              << "across " << tasks.size() << " reference tasks\n";
+
+    std::thread tailWorker([&]() {
+        try {
+            BamTools::BamReader reader;
+            if (!reader.Open(bamPath)) {
+                tailError =
+                    "could not open BAM for no-coordinate scan: " +
+                    reader.GetErrorString();
+                failed.store(true);
+                return;
+            }
+
+            ExomeSearchHints lastfound;
+            BamTools::BamAlignment record;
+
+            while (!failed.load() && reader.GetNextAlignment(record)) {
+                tailInspected += 1;
+
+                if (record.RefID < 0 || record.Position < 0) {
+                    tailScanned += 1;
+                    scan_alignment_parallel(
+                        record,
+                        rggroups,
+                        isExome,
+                        tailResults,
+                        lastfound,
+                        tailProcessed);
+                }
+            }
+
+            if (!failed.load()) {
+                // The original loop scans its alignment object once after EOF.
+                // If the BAM is empty, it scans the default object; otherwise
+                // it scans the final physical record a second time.
+                tailScanned += 1;
+                scan_alignment_parallel(
+                    record,
+                    rggroups,
+                    isExome,
+                    tailResults,
+                    lastfound,
+                    tailProcessed);
+            }
+            reader.Close();
+        } catch (const std::exception& error) {
+            tailError = error.what();
+            failed.store(true);
+        } catch (...) {
+            tailError = "unknown no-coordinate scanner exception";
+            failed.store(true);
+        }
+    });
+
+    for (std::size_t workerID = 0;
+         workerID < mappedWorkerCount;
+         ++workerID) {
+        workers.push_back(std::thread([&, workerID]() {
+            try {
+                BamTools::BamReader reader;
+                if (!reader.Open(bamPath)) {
+                    workerErrors[workerID] =
+                        "could not open BAM: " + reader.GetErrorString();
+                    failed.store(true);
+                    return;
+                }
+                if (!reader.LocateIndex()) {
+                    workerErrors[workerID] =
+                        "could not locate BAM index: " + reader.GetErrorString();
+                    failed.store(true);
+                    reader.Close();
+                    return;
+                }
+
+                ExomeSearchHints lastfound;
+                while (!failed.load()) {
+                    const std::size_t taskIndex = nextTask.fetch_add(1);
+                    if (taskIndex >= tasks.size()) {
+                        break;
+                    }
+
+                    const ReferenceTask& task = tasks[taskIndex];
+                    const bool positioned = reader.SetRegion(
+                        task.refID,
+                        0,
+                        task.refID,
+                        task.refLength);
+
+                    if (!positioned) {
+                        workerErrors[workerID] =
+                            "could not seek to reference " +
+                            references[task.refID].RefName + ": " +
+                            reader.GetErrorString();
+                        failed.store(true);
+                        break;
+                    }
+
+                    BamTools::BamAlignment record;
+                    while (reader.GetNextAlignment(record)) {
+                        workerScanned[workerID] += 1;
+                        scan_alignment_parallel(
+                            record,
+                            rggroups,
+                            isExome,
+                            workerResults[workerID],
+                            lastfound,
+                            workerProcessed[workerID]);
+                    }
+                }
+                reader.Close();
+            } catch (const std::exception& error) {
+                workerErrors[workerID] = error.what();
+                failed.store(true);
+            } catch (...) {
+                workerErrors[workerID] = "unknown worker exception";
+                failed.store(true);
+            }
+        }));
+    }
+
+    for (std::size_t i = 0; i < workers.size(); ++i) {
+        workers[i].join();
+    }
+    tailWorker.join();
+
+    if (failed.load()) {
+        if (!tailError.empty()) {
+            std::cerr << "Error in no-coordinate scanner: "
+                      << tailError << "\n";
+        }
+        for (std::size_t i = 0; i < workerErrors.size(); ++i) {
+            if (!workerErrors[i].empty()) {
+                std::cerr << "Error in worker " << i + 1 << ": "
+                          << workerErrors[i] << "\n";
+            }
+        }
+        return false;
+    }
+
+    combinedResults = emptyResultMap;
+    totalScanned = tailScanned;
+    uint64_t totalProcessed = tailProcessed;
+    for (ResultMap::const_iterator source = tailResults.begin();
+         source != tailResults.end();
+         ++source) {
+        ResultMap::iterator destination = combinedResults.find(source->first);
+        if (destination == combinedResults.end()) {
+            std::cerr << "Error: no-coordinate scanner returned unknown "
+                      << "read group " << source->first << "\n";
+            return false;
+        }
+        add_thread_results(destination->second, source->second);
+    }
+
+    for (std::size_t workerID = 0;
+         workerID < mappedWorkerCount;
+         ++workerID) {
+        totalScanned += workerScanned[workerID];
+        totalProcessed += workerProcessed[workerID];
+        for (ResultMap::const_iterator source =
+                 workerResults[workerID].begin();
+             source != workerResults[workerID].end();
+             ++source) {
+            ResultMap::iterator destination =
+                combinedResults.find(source->first);
+            if (destination == combinedResults.end()) {
+                std::cerr << "Error: worker returned unknown read group "
+                          << source->first << "\n";
+                return false;
+            }
+            add_thread_results(destination->second, source->second);
+        }
+    }
+
+    std::cerr << "[scan] no-coordinate scanner inspected "
+              << tailInspected << " BAM records\n";
+    std::cerr << "[scan] parallel workers processed " << totalProcessed
+              << " reads after filters\n";
+    return true;
 }
 
 // merge results in result list into one
@@ -204,6 +612,32 @@ int scanBam()
 	  results.lib = opt::unknown;
 	  resultmap[opt::unknown]=results;
 	}
+      }
+
+      if(opt::threads > 1){
+        ResultMap parallelResults;
+        uint64_t parallelTotal = 0;
+        const bool parallelOk = scan_bam_parallel(
+            opt::bamlist[i],
+            *pBamReader,
+            resultmap,
+            rggroups,
+            isExome,
+            parallelResults,
+            parallelTotal);
+
+        pBamReader->Close();
+        delete pBamReader;
+
+        if(!parallelOk){
+          return 1;
+        }
+
+        resultlist.push_back(parallelResults);
+        std::cerr << "[scan] total reads in BAM scanned "
+                  << parallelTotal << std::endl;
+        std::cerr << "Completed scanning BAM\n";
+        continue;
       }
 
       BamTools::BamAlignment record1;
@@ -584,6 +1018,17 @@ void parseScanOptions(int argc, char** argv)
 					exit(EXIT_FAILURE);
 				}
 				break;
+            case 't':
+                {
+                    int requestedThreads = 0;
+                    arg >> requestedThreads;
+                    if(!arg || requestedThreads < 1 || requestedThreads > 1024){
+                        std::cerr << "threads must be an integer from 1 to 1024\n";
+                        exit(EXIT_FAILURE);
+                    }
+                    opt::threads = static_cast<unsigned int>(requestedThreads);
+                }
+                break;
             case 'p':
 
 				break;
@@ -680,7 +1125,7 @@ int main(int argc, char** argv)
 {
 	Timer* pTimer = new Timer("scan BAM");
 	parseScanOptions(argc, argv);
-    scanBam();
+    const int status = scanBam();
     delete pTimer;
-    return 0;
+    return status;
 }

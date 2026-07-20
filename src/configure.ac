@@ -26,8 +26,9 @@ AC_ARG_WITH(bamtools,
         )
 
 # Set compiler flags.
-#AC_SUBST(AM_CXXFLAGS, "-Wall -Wextra -Werror -Wno-unknown-pragmas")
-AC_SUBST(AM_CXXFLAGS, "-Wall -Wextra -Wno-unknown-pragmas -g -O0")
+# Keep normal floating-point semantics for output compatibility. In
+# particular, do not add -ffast-math here.
+AC_SUBST(AM_CXXFLAGS, "-std=c++11 -Wall -Wextra -Wno-unknown-pragmas -g -O3 -pthread")
 #AC_SUBST(CXXFLAGS, "-O3")
 #AC_SUBST(CFLAGS, "-O3")
 
@@ -41,7 +42,7 @@ AC_SUBST(LDFLAGS, "$bamtools_ldflags $gzstream_ldflags $LDFLAGS")
 #AC_MSG_NOTICE(["LDFLAGS is $LDFLAGS"])
 
 # We always need to specify to link in bamtools
-AC_SUBST(LIBS, "$LIBS -lbamtools -lz")
+AC_SUBST(LIBS, "$LIBS -lbamtools -lz -pthread")
 
 #AC_MSG_NOTICE(["LIBS is $LIBS"])
 

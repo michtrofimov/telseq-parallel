@@ -64,6 +64,49 @@ The /path/to/bamtools directory is the directory that contains 'lib' and 'includ
 ##### Read options and usage information
 `telseq`
 
+### Parallel scan of one BAM
+
+Use `-t` (or `--threads`) to scan one coordinate-sorted, indexed BAM with
+multiple independent BamTools readers:
+
+```
+telseq -t 8 sample.bam
+```
+
+Parallel mode requires an index that BamTools can locate next to the BAM,
+normally `sample.bam.bai` or `sample.bai`. The BAM header must declare
+`SO:coordinate`. The work is split by complete reference sequences; an
+individual chromosome is not divided between multiple workers.
+
+One requested thread is reserved for a compatibility scan that captures
+no-coordinate alignments (which BamTools region iterators do not return) and
+the stock TelSeq final-record behaviour. For example, `-t 8` uses seven
+indexed reference workers plus one compatibility scanner. The compatibility
+scanner reads the BAM sequentially but only contributes no-coordinate records
+and the final legacy contribution; this extra pass is required for stock-output
+compatibility and can limit scaling when storage or decompression is the
+bottleneck.
+
+`-t 1` is the default and retains the original sequential scan path. Parallel
+mode preserves the original TelSeq counting behaviour, including its legacy
+final-record contribution, so its tabular output can be compared directly with
+the stock binary.
+
+Before using parallel mode in production, compare it against the stock binary
+and benchmark useful thread counts on the actual storage system:
+
+```
+scripts/compare_and_benchmark.sh \
+    /path/to/stock/telseq \
+    /path/to/new/telseq \
+    /path/to/sample.bam \
+    1 2 4 8 16 24
+```
+
+The script stops at the first output mismatch by default and leaves all output,
+logs, checksums, and timings in a timestamped directory. Set
+`TELSEQ_STOP_ON_MISMATCH=0` to continue after a mismatch.
+
 ##### Analyse one or more BAMs by specifying BAM file path as command line arguments.
 `telseq a.bam b.bam`
 
