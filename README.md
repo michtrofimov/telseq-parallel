@@ -114,6 +114,22 @@ scripts/compare_and_benchmark.sh \
     22 44
 ```
 
+To use the same TelSeq analysis parameters for every parallel run, put them
+after `--`:
+
+```
+scripts/compare_and_benchmark.sh \
+    --reference-output /path/to/stock-result.tsv \
+    /path/to/new/telseq \
+    /path/to/sample.bam \
+    22 44 80 \
+    -- -k 7 -r 100 -u
+```
+
+The reference output must have been generated with the same TelSeq parameters.
+Do not pass `-t`, `-f`, or `-o` after `--`; the benchmark controls the thread
+count, input BAM, and captured output.
+
 The benchmark does not run the expensive `samtools view -c` count by default.
 Set `TELSEQ_RUN_BAM_COUNT=1` only when that additional full BAM pass is wanted.
 

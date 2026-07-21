@@ -58,8 +58,14 @@ scripts/compare_and_benchmark.sh \
     --reference-output /path/to/stock-result.tsv \
     src/Telseq/telseq \
     /path/to/sample.bam \
-    22 44
+    22 44 80 \
+    -- -k 7 -r 100 -u
 ```
+
+Arguments following `--` are forwarded unchanged to every new TelSeq run. The
+reference output must have been produced using those same arguments. The
+wrapper reserves `-t`, `-f`, and `-o` because it controls threads, BAM input,
+and stdout capture itself.
 
 The benchmark skips `samtools view -c` by default. It should be enabled with
 `TELSEQ_RUN_BAM_COUNT=1` only when the additional full BAM pass is useful.

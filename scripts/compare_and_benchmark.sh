@@ -4,8 +4,8 @@ set -u
 
 usage() {
     echo "Usage:" >&2
-    echo "  $0 STOCK_TELSEQ NEW_TELSEQ SAMPLE_BAM [THREADS ...]" >&2
-    echo "  $0 --reference-output STOCK_OUTPUT NEW_TELSEQ SAMPLE_BAM [THREADS ...]" >&2
+    echo "  $0 STOCK_TELSEQ NEW_TELSEQ SAMPLE_BAM [THREADS ...] [-- TELSEQ_ARGS ...]" >&2
+    echo "  $0 --reference-output STOCK_OUTPUT NEW_TELSEQ SAMPLE_BAM [THREADS ...] [-- TELSEQ_ARGS ...]" >&2
 }
 
 if [ "$#" -lt 3 ]; then
@@ -34,9 +34,51 @@ case "$1" in
         ;;
 esac
 
-if [ "$#" -eq 0 ]; then
-    set -- 1 2 4 8 16 24
+thread_grid=()
+telseq_args=()
+
+while [ "$#" -gt 0 ]; do
+    if [ "$1" = "--" ]; then
+        shift
+        while [ "$#" -gt 0 ]; do
+            telseq_args+=("$1")
+            shift
+        done
+        break
+    fi
+    thread_grid+=("$1")
+    shift
+done
+
+if [ "${#thread_grid[@]}" -eq 0 ]; then
+    thread_grid=(1 2 4 8 16 24)
 fi
+
+for argument in "${telseq_args[@]}"; do
+    case "$argument" in
+        -t|-t*|--threads|--threads=*)
+            echo "Error: pass thread counts before --; do not include $argument in TELSEQ_ARGS" >&2
+            exit 2
+            ;;
+        -f|-f*|--bamlist|--bamlist=*)
+            echo "Error: the benchmark controls the input BAM; do not pass $argument" >&2
+            exit 2
+            ;;
+        -o|-o*|--output-dir|--output-dir=*)
+            echo "Error: the benchmark captures stdout; do not pass $argument" >&2
+            exit 2
+            ;;
+    esac
+done
+
+for thread_count in "${thread_grid[@]}"; do
+    case "$thread_count" in
+        ''|*[!0-9]*)
+            echo "Error: invalid thread count: $thread_count" >&2
+            exit 2
+            ;;
+    esac
+done
 
 if [ "$reference_mode" = "file" ]; then
     reference_source=$reference_output
@@ -90,7 +132,10 @@ environment_log="$output_dir/environment.txt"
     echo "reference: $reference_source"
     echo "new: $new_telseq"
     echo "bam: $bam"
-    echo "threads: $*"
+    echo "threads: ${thread_grid[*]}"
+    printf 'telseq args:'
+    printf ' %q' "${telseq_args[@]}"
+    printf '\n'
     echo
     echo "new TelSeq version:"
     "$new_telseq" --version 2>&1 || true
@@ -153,7 +198,7 @@ if [ "$reference_mode" = "file" ]; then
     echo "Using existing stock output: $reference_output"
 else
     echo "Running stock TelSeq..."
-    if ! run_timed stock "$stock_telseq" "$bam"; then
+    if ! run_timed stock "$stock_telseq" "${telseq_args[@]}" "$bam"; then
         echo "Error: stock TelSeq failed. See $output_dir/stock.stderr" >&2
         echo "Results: $output_dir"
         exit 1
@@ -164,18 +209,12 @@ fi
 stop_on_mismatch=${TELSEQ_STOP_ON_MISMATCH:-1}
 had_failure=0
 
-for threads in "$@"; do
-    case "$threads" in
-        ''|*[!0-9]*)
-            echo "Error: invalid thread count: $threads" >&2
-            exit 2
-            ;;
-    esac
-
-    label="threads-${threads}"
-    echo "Running new TelSeq with -t $threads..."
-    if ! run_timed "$label" "$new_telseq" -t "$threads" "$bam"; then
-        echo "FAIL: -t $threads exited unsuccessfully; see ${label}.stderr" >&2
+for thread_count in "${thread_grid[@]}"; do
+    label="threads-${thread_count}"
+    echo "Running new TelSeq with -t $thread_count..."
+    if ! run_timed "$label" "$new_telseq" \
+        "${telseq_args[@]}" -t "$thread_count" "$bam"; then
+        echo "FAIL: -t $thread_count exited unsuccessfully; see ${label}.stderr" >&2
         had_failure=1
         if [ "$stop_on_mismatch" != "0" ]; then
             break
@@ -184,9 +223,9 @@ for threads in "$@"; do
     fi
 
     if cmp -s "$reference_stdout" "$output_dir/${label}.stdout"; then
-        echo "PASS: -t $threads output is byte-identical to the reference"
+        echo "PASS: -t $thread_count output is byte-identical to the reference"
     else
-        echo "FAIL: -t $threads output differs from the reference" >&2
+        echo "FAIL: -t $thread_count output differs from the reference" >&2
         diff -u "$reference_stdout" "$output_dir/${label}.stdout" \
             > "$output_dir/${label}.diff" || true
         echo "Diff: $output_dir/${label}.diff" >&2
