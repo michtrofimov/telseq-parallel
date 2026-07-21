@@ -206,8 +206,7 @@ To just print out the header, use '-h' option. i.e.
 
 ## Docker
 
-Release images are published for Linux AMD64 and ARM64 in the GitHub Container
-Registry:
+Release images for Linux AMD64 are published in the GitHub Container Registry:
 
 ```
 docker pull ghcr.io/michtrofimov/telseq-parallel:0.1.0
