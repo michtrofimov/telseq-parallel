@@ -14,7 +14,7 @@ First parallel TelSeq release.
 - byte-for-byte comparison and timing against existing stock output;
 - forwarding of TelSeq analysis arguments through the benchmark wrapper;
 - a reproducible 64-reference synthetic BAM compatibility test;
-- a multi-architecture container image published to GHCR.
+- a Linux AMD64 container image published to GHCR.
 
 ### Compatibility
 
