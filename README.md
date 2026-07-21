@@ -269,6 +269,21 @@ docker build -t telseq-parallel:local .
 
 ## Performance and validation
 
+### Observed real-WGS scaling
+
+TelSeq Parallel has been compared across 1, 4, 8, 12, 22, 44, and 80 threads
+on a real WGS BAM. In that environment, wall time fell from 54.62 minutes at
+`-t 1` to 38.15 minutes at `-t 4`, a 1.43× speedup. Higher thread counts did
+not improve wall time: every result from 4 through 80 threads remained within
+24 seconds of the fastest run.
+
+![Real WGS wall time by requested thread count](benchmarks/real-wgs-2026-07-21/wall-time-vs-threads.svg)
+
+For that BAM and infrastructure, `-t 4` was the best practical setting. This
+is not a universal recommendation: storage, cache state, BAM layout, and node
+hardware can change the optimum. See the
+[complete benchmark, raw timings, and limitations](benchmarks/real-wgs-2026-07-21/README.md).
+
 More threads do not necessarily make a BAM scan faster. Parallel mode retains
 one full compatibility scan, while the indexed workers read reference-assigned
 records. Storage bandwidth, decompression, the number and size of references,
