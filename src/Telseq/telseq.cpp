@@ -11,9 +11,13 @@
 #include <map>
 #include <atomic>
 #include <exception>
+#include <memory>
 #include <mutex>
 #include <thread>
 #include <unistd.h>
+
+#include <htslib/hts.h>
+#include <htslib/sam.h>
 
 #include "telseq.h"
 #include "Timer.h"
@@ -128,6 +132,62 @@ struct ReferenceTask
 
 static std::mutex parallelLogMutex;
 
+struct SamFileDeleter
+{
+    void operator()(samFile* file) const
+    {
+        if (file != NULL) {
+            sam_close(file);
+        }
+    }
+};
+
+struct SamHeaderDeleter
+{
+    void operator()(bam_hdr_t* header) const
+    {
+        if (header != NULL) {
+            bam_hdr_destroy(header);
+        }
+    }
+};
+
+struct HtsIndexDeleter
+{
+    void operator()(hts_idx_t* index) const
+    {
+        if (index != NULL) {
+            hts_idx_destroy(index);
+        }
+    }
+};
+
+struct HtsIteratorDeleter
+{
+    void operator()(hts_itr_t* iterator) const
+    {
+        if (iterator != NULL) {
+            hts_itr_destroy(iterator);
+        }
+    }
+};
+
+struct BamRecordDeleter
+{
+    void operator()(bam1_t* record) const
+    {
+        if (record != NULL) {
+            bam_destroy1(record);
+        }
+    }
+};
+
+typedef std::unique_ptr<samFile, SamFileDeleter> SamFilePtr;
+typedef std::unique_ptr<bam_hdr_t, SamHeaderDeleter> SamHeaderPtr;
+typedef std::unique_ptr<hts_idx_t, HtsIndexDeleter> HtsIndexPtr;
+typedef std::unique_ptr<hts_itr_t, HtsIteratorDeleter> HtsIteratorPtr;
+typedef std::unique_ptr<bam1_t, BamRecordDeleter> BamRecordPtr;
+
 // This reducer is intentionally separate from add_results().  The latter is
 // part of the legacy -w path and its behaviour is kept unchanged for output
 // compatibility with the original TelSeq release.
@@ -152,6 +212,46 @@ static void print_parallel_warning(const std::string& message)
 {
     std::lock_guard<std::mutex> lock(parallelLogMutex);
     std::cerr << message;
+}
+
+static bool convert_hts_alignment(
+    const bam1_t* source,
+    BamTools::BamAlignment& destination,
+    std::string& error)
+{
+    if (source == NULL) {
+        error = "HTSlib returned a null BAM alignment";
+        return false;
+    }
+
+    destination = BamTools::BamAlignment();
+    destination.RefID = source->core.tid;
+    destination.Position = source->core.pos;
+    destination.Length = source->core.l_qseq;
+    destination.AlignmentFlag = source->core.flag;
+
+    static const char sequenceLookup[] = "=ACMGRSVTWYHKDBN";
+    const uint8_t* encodedSequence = bam_get_seq(source);
+    destination.QueryBases.resize(source->core.l_qseq);
+    for (int i = 0; i < source->core.l_qseq; ++i) {
+        destination.QueryBases[i] =
+            sequenceLookup[bam_seqi(encodedSequence, i)];
+    }
+
+    const uint8_t* readGroupTag = bam_aux_get(source, "RG");
+    if (readGroupTag != NULL) {
+        const char* readGroup = bam_aux2Z(readGroupTag);
+        if (readGroup == NULL) {
+            error = "HTSlib found a non-string RG tag";
+            return false;
+        }
+        if (!destination.AddTag("RG", "Z", std::string(readGroup))) {
+            error = "could not copy RG tag from HTSlib alignment";
+            return false;
+        }
+    }
+
+    return true;
 }
 
 // Scan one alignment into a worker-local result map. This mirrors the body of
@@ -253,6 +353,29 @@ static void scan_alignment_parallel(
     nprocessed += 1;
 }
 
+static bool scan_htslib_alignment(
+    const bam1_t* source,
+    const bool rggroups,
+    const bool isExome,
+    ResultMap& resultmap,
+    ExomeSearchHints& lastfound,
+    uint64_t& nprocessed,
+    std::string& error)
+{
+    BamTools::BamAlignment converted;
+    if (!convert_hts_alignment(source, converted, error)) {
+        return false;
+    }
+    scan_alignment_parallel(
+        converted,
+        rggroups,
+        isExome,
+        resultmap,
+        lastfound,
+        nprocessed);
+    return true;
+}
+
 static bool header_is_coordinate_sorted(const std::string& headerText)
 {
     std::istringstream headerStream(headerText);
@@ -315,9 +438,9 @@ static bool scan_bam_parallel(
             return left.refLength > right.refLength;
         });
 
-    // One thread performs a compatibility pass for no-coordinate records and
-    // the legacy final-record contribution. The remaining threads process
-    // mapped reference tasks through the index.
+    // One thread uses HTSlib's no-coordinate index iterator for unplaced
+    // records and the legacy final-record contribution. The remaining threads
+    // process mapped reference tasks through the index.
     const std::size_t mappedWorkerCount =
         std::min<std::size_t>(opt::threads - 1, tasks.size());
     std::vector<ResultMap> workerResults(mappedWorkerCount, emptyResultMap);
@@ -327,7 +450,9 @@ static bool scan_bam_parallel(
     ResultMap tailResults = emptyResultMap;
     uint64_t tailScanned = 0;
     uint64_t tailProcessed = 0;
-    uint64_t tailInspected = 0;
+    uint64_t tailIndexedFetched = 0;
+    uint64_t tailNoCoordinateFetched = 0;
+    uint64_t tailFallbackFetched = 0;
     std::string tailError;
     std::atomic<std::size_t> nextTask(0);
     std::atomic<bool> failed(false);
@@ -335,52 +460,174 @@ static bool scan_bam_parallel(
     workers.reserve(mappedWorkerCount);
 
     std::cerr << "Indexed parallel scan using " << mappedWorkerCount
-              << " mapped-reference workers and 1 no-coordinate scanner "
+              << " mapped-reference workers and 1 HTSlib compatibility scanner "
               << "across " << tasks.size() << " reference tasks\n";
 
     std::thread tailWorker([&]() {
         try {
-            BamTools::BamReader reader;
-            if (!reader.Open(bamPath)) {
+            SamFilePtr reader(sam_open(bamPath.c_str(), "rb"));
+            if (!reader) {
+                tailError = "HTSlib could not open BAM for compatibility scan";
+                failed.store(true);
+                return;
+            }
+
+            SamHeaderPtr header(sam_hdr_read(reader.get()));
+            if (!header) {
+                tailError = "HTSlib could not read BAM header";
+                failed.store(true);
+                return;
+            }
+
+            HtsIndexPtr index(sam_index_load(reader.get(), bamPath.c_str()));
+            if (!index) {
                 tailError =
-                    "could not open BAM for no-coordinate scan: " +
-                    reader.GetErrorString();
+                    "HTSlib could not load a BAI or CSI index for " + bamPath;
+                failed.store(true);
+                return;
+            }
+
+            BamRecordPtr record(bam_init1());
+            BamRecordPtr finalRecord(bam_init1());
+            if (!record || !finalRecord) {
+                tailError = "HTSlib could not allocate BAM records";
                 failed.store(true);
                 return;
             }
 
             ExomeSearchHints lastfound;
-            BamTools::BamAlignment record;
+            bool haveFinalRecord = false;
 
-            while (!failed.load() && reader.GetNextAlignment(record)) {
-                tailInspected += 1;
+            HtsIteratorPtr noCoordinateIterator(
+                sam_itr_queryi(index.get(), HTS_IDX_NOCOOR, 0, 0));
+            if (!noCoordinateIterator) {
+                tailError =
+                    "HTSlib index does not support direct no-coordinate access";
+                failed.store(true);
+                return;
+            }
 
-                if (record.RefID < 0 || record.Position < 0) {
-                    tailScanned += 1;
-                    scan_alignment_parallel(
-                        record,
+            int iteratorStatus = 0;
+            while (!failed.load() &&
+                   (iteratorStatus = sam_itr_next(
+                        reader.get(),
+                        noCoordinateIterator.get(),
+                        record.get())) >= 0) {
+                tailIndexedFetched += 1;
+                tailNoCoordinateFetched += 1;
+                tailScanned += 1;
+
+                if (!scan_htslib_alignment(
+                        record.get(),
                         rggroups,
                         isExome,
                         tailResults,
                         lastfound,
-                        tailProcessed);
+                        tailProcessed,
+                        tailError)) {
+                    failed.store(true);
+                    return;
+                }
+
+                if (bam_copy1(finalRecord.get(), record.get()) == NULL) {
+                    tailError = "HTSlib could not retain final BAM record";
+                    failed.store(true);
+                    return;
+                }
+                haveFinalRecord = true;
+            }
+
+            if (iteratorStatus < -1) {
+                tailError =
+                    "HTSlib failed while reading no-coordinate BAM records";
+                failed.store(true);
+                return;
+            }
+
+            // A coordinate-sorted BAM normally ends with its no-coordinate
+            // records, so the last one above is also the final physical BAM
+            // record. If that tail is empty, find the highest populated
+            // reference and retain its last record. This reads at most one
+            // reference rather than performing a full sequential BAM pass.
+            if (!haveFinalRecord) {
+                for (int refID = header->n_targets - 1;
+                     refID >= 0 && !haveFinalRecord;
+                     --refID) {
+                    uint64_t mapped = 0;
+                    uint64_t unmapped = 0;
+                    if (hts_idx_get_stat(
+                            index.get(), refID, &mapped, &unmapped) == 0 &&
+                        mapped + unmapped == 0) {
+                        continue;
+                    }
+
+                    HtsIteratorPtr referenceIterator(
+                        sam_itr_queryi(
+                            index.get(),
+                            refID,
+                            0,
+                            header->target_len[refID]));
+                    if (!referenceIterator) {
+                        tailError =
+                            "HTSlib could not query final populated reference";
+                        failed.store(true);
+                        return;
+                    }
+
+                    iteratorStatus = 0;
+                    bool referenceHadRecords = false;
+                    while (!failed.load() &&
+                           (iteratorStatus = sam_itr_next(
+                                reader.get(),
+                                referenceIterator.get(),
+                                record.get())) >= 0) {
+                        tailIndexedFetched += 1;
+                        tailFallbackFetched += 1;
+                        referenceHadRecords = true;
+                        if (bam_copy1(finalRecord.get(), record.get()) == NULL) {
+                            tailError =
+                                "HTSlib could not retain final BAM record";
+                            failed.store(true);
+                            return;
+                        }
+                    }
+
+                    if (iteratorStatus < -1) {
+                        tailError =
+                            "HTSlib failed while locating final BAM record";
+                        failed.store(true);
+                        return;
+                    }
+                    haveFinalRecord = referenceHadRecords;
                 }
             }
 
-            if (!failed.load()) {
-                // The original loop scans its alignment object once after EOF.
-                // If the BAM is empty, it scans the default object; otherwise
-                // it scans the final physical record a second time.
-                tailScanned += 1;
+            // The original loop scans its alignment object once after EOF. If
+            // the BAM is empty it scans a default object; otherwise it scans
+            // the final physical record a second time.
+            tailScanned += 1;
+            if (haveFinalRecord) {
+                if (!scan_htslib_alignment(
+                        finalRecord.get(),
+                        rggroups,
+                        isExome,
+                        tailResults,
+                        lastfound,
+                        tailProcessed,
+                        tailError)) {
+                    failed.store(true);
+                    return;
+                }
+            } else {
+                BamTools::BamAlignment emptyRecord;
                 scan_alignment_parallel(
-                    record,
+                    emptyRecord,
                     rggroups,
                     isExome,
                     tailResults,
                     lastfound,
                     tailProcessed);
             }
-            reader.Close();
         } catch (const std::exception& error) {
             tailError = error.what();
             failed.store(true);
@@ -510,8 +757,11 @@ static bool scan_bam_parallel(
         }
     }
 
-    std::cerr << "[scan] no-coordinate scanner inspected "
-              << tailInspected << " BAM records\n";
+    std::cerr << "[scan] HTSlib compatibility scanner fetched "
+              << tailIndexedFetched << " indexed BAM records: "
+              << tailNoCoordinateFetched << " no-coordinate, "
+              << tailFallbackFetched << " final-reference fallback; "
+              << "full sequential scans: 0\n";
     std::cerr << "[scan] parallel workers processed " << totalProcessed
               << " reads after filters\n";
     return true;

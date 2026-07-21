@@ -12,6 +12,7 @@ RUN apt-get update && \
         automake \
         build-essential \
         libbamtools-dev \
+        libhts-dev \
         zlib1g-dev && \
     rm -rf /var/lib/apt/lists/*
 
@@ -23,14 +24,16 @@ WORKDIR /src/telseq/src
 RUN ./autogen.sh && \
     ./configure \
         --with-bamtools=/usr \
+        --with-htslib=/usr \
         --prefix=/opt/telseq && \
     make -j2 && \
-    ./Test/generate_parallel_fixture /tmp/parallel-fixture.bam && \
-    ./Telseq/telseq -t 1 /tmp/parallel-fixture.bam \
-        > /tmp/telseq-serial.tsv 2> /tmp/telseq-serial.log && \
-    ./Telseq/telseq -t 22 /tmp/parallel-fixture.bam \
-        > /tmp/telseq-parallel.tsv 2> /tmp/telseq-parallel.log && \
-    cmp /tmp/telseq-serial.tsv /tmp/telseq-parallel.tsv && \
+    ../scripts/test_parallel_synthetic.sh \
+        ../bin/ubuntu/telseq \
+        ./Telseq/telseq \
+        ./Test/generate_parallel_fixture && \
+    ../scripts/test_parallel_scaling.sh \
+        ./Telseq/telseq \
+        ./Test/generate_parallel_fixture && \
     make install
 
 FROM ubuntu:${UBUNTU_VERSION} AS runtime
@@ -44,7 +47,8 @@ LABEL org.opencontainers.image.title="TelSeq Parallel" \
 
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
-        libbamtools2.5.1 && \
+        libbamtools2.5.1 \
+        libhts3 && \
     rm -rf /var/lib/apt/lists/*
 
 COPY --from=builder /opt/telseq/bin/telseq /usr/local/bin/telseq

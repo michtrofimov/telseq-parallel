@@ -39,16 +39,32 @@ TELSEQ_BENCH_OUT="$results_dir" \
     1 2 22 44
 
 if ! grep -q \
-    "using 21 mapped-reference workers and 1 no-coordinate scanner across 64 reference tasks" \
+    "using 21 mapped-reference workers and 1 HTSlib compatibility scanner across 64 reference tasks" \
     "$results_dir/threads-22.stderr"; then
     echo "FAIL: -t 22 did not start the expected worker layout" >&2
     exit 1
 fi
 
 if ! grep -q \
-    "using 43 mapped-reference workers and 1 no-coordinate scanner across 64 reference tasks" \
+    "using 43 mapped-reference workers and 1 HTSlib compatibility scanner across 64 reference tasks" \
     "$results_dir/threads-44.stderr"; then
     echo "FAIL: -t 44 did not start the expected worker layout" >&2
+    exit 1
+fi
+
+expected_fast_scan="[scan] HTSlib compatibility scanner fetched 8 indexed BAM records: 8 no-coordinate, 0 final-reference fallback; full sequential scans: 0"
+if ! grep -Fqx \
+    "$expected_fast_scan" \
+    "$results_dir/threads-22.stderr"; then
+    echo "FAIL: compatibility scanner did not use direct indexed tail access" >&2
+    echo "Expected log: $expected_fast_scan" >&2
+    exit 1
+fi
+
+if ! grep -Fqx \
+    "[scan] parallel workers processed 1130 reads after filters" \
+    "$results_dir/threads-22.stderr"; then
+    echo "FAIL: indexed tail scan did not retain the legacy final record" >&2
     exit 1
 fi
 
@@ -65,4 +81,5 @@ fi
 echo
 echo "PASS: synthetic parallel test completed"
 echo "Expected legacy counts: Total=1130 Mapped=1120 Duplicates=3"
+echo "Fast tail access: 8 indexed records fetched; 0 full sequential scans"
 echo "Artifacts: $test_dir"

@@ -1,4 +1,5 @@
 #include <cstdint>
+#include <cstdlib>
 #include <iostream>
 #include <sstream>
 #include <string>
@@ -41,14 +42,26 @@ static BamTools::BamAlignment make_alignment(
 
 int main(int argc, char** argv)
 {
-    if (argc != 2) {
-        std::cerr << "Usage: " << argv[0] << " OUTPUT.bam\n";
+    if (argc < 2 || argc > 4) {
+        std::cerr << "Usage: " << argv[0]
+                  << " OUTPUT.bam [READS_PER_REFERENCE [READ_LENGTH]]\n";
         return 2;
     }
 
     const std::string bamPath = argv[1];
+    const int readsPerReference = argc >= 3 ? std::atoi(argv[2]) : 20;
+    const int readLength = argc >= 4 ? std::atoi(argv[3]) : 100;
+    if (readsPerReference < 1 || readLength < 100 || readLength > 100000) {
+        std::cerr << "READS_PER_REFERENCE must be positive and READ_LENGTH "
+                  << "must be between 100 and 100000\n";
+        return 2;
+    }
+
     const int referenceCount = 64;
-    const int referenceLength = 100000;
+    const int recordSpacing = readLength + 20;
+    const int referenceLength = std::max(
+        100000,
+        10000 + (readsPerReference + 1) * recordSpacing);
     BamTools::RefVector references;
     std::ostringstream header;
     header << "@HD\tVN:1.0\tSO:coordinate\n";
@@ -69,10 +82,11 @@ int main(int argc, char** argv)
         return 1;
     }
 
-    const std::string ordinary(100, 'A');
-    const std::string telomeric =
+    const std::string ordinary(readLength, 'A');
+    std::string telomeric =
         "TTAGGGTTAGGGTTAGGGTTAGGGTTAGGGTTAGGGTTAGGGTTAGGG"
         "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+    telomeric.resize(readLength, 'A');
 
     uint64_t physicalRecords = 0;
     uint64_t mappedRecords = 0;
@@ -85,12 +99,12 @@ int main(int argc, char** argv)
             continue;
         }
 
-        for (int i = 0; i < 20; ++i) {
+        for (int i = 0; i < readsPerReference; ++i) {
             BamTools::BamAlignment alignment = make_alignment(
                 "mapped-" + std::to_string(refID) + "-" +
                     std::to_string(i),
                 refID,
-                100 + i * 100,
+                100 + i * recordSpacing,
                 i == 0 ? telomeric : ordinary,
                 true,
                 refID == 0 && i == 1);
