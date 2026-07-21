@@ -8,6 +8,8 @@ In particular, keep `-r`, `-k`, `-z`, `-e`, `-m`, `-u`, and `-w` identical.
 The read-length option `-r` changes the number of `TEL` columns as well as the
 calculation, so a mismatch there makes the outputs incomparable.
 
+Published measurements are indexed in [benchmarks/README.md](benchmarks/README.md).
+
 ## Reproducible synthetic compatibility test
 
 The repository includes a small synthetic BAM generator and an end-to-end
