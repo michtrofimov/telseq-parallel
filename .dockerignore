@@ -1,0 +1,5 @@
+.git
+.github
+bin
+telseq-benchmark-*
+src/Test/test.*.bam

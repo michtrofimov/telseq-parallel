@@ -206,26 +206,29 @@ To just print out the header, use '-h' option. i.e.
 
 ## Docker
 
-### Install Docker
-
-Please refer to the official website for installing Docker
-[https://docs.docker.com/engine/installation/](https://docs.docker.com/engine/installation/)
-
-
-### Build telseq Docker image
+Release images are published for Linux AMD64 and ARM64 in the GitHub Container
+Registry:
 
 ```
-docker build -t telseq-docker github.com/zd1/telseq
+docker pull ghcr.io/michtrofimov/telseq-parallel:0.1.0
 ```
 
-### Run telseq
-
-Note that the sample path "/path/to/bam/sample.bam" in the machine
-that the container is run needs to be specified. "/sample.bam" doesn't
-need to be changed.
+Mount the directory containing both the BAM and its index, then pass normal
+TelSeq options after the image name:
 
 ```
-docker run -v /path/to/bam/sample.bam:/sample.bam telseq-docker /sample.bam
+docker run --rm \
+    -v /path/to/bam-directory:/data:ro \
+    ghcr.io/michtrofimov/telseq-parallel:0.1.0 \
+    -t 22 -r 151 /data/sample.bam \
+    > sample.telseq.tsv
+```
+
+The BAI should be available as `/data/sample.bam.bai` or `/data/sample.bai`.
+To build the image from the current checkout instead:
+
+```
+docker build -t telseq-parallel:local .
 ```
 
 ## Contact
