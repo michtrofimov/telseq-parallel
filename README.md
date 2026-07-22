@@ -163,6 +163,12 @@ dense short references early instead of leaving them as end-of-run
 stragglers. If an index format does not expose those totals, scheduling falls
 back to genomic-window length.
 
+With `--primary-chromosomes-only`, only exact human primary reference names
+`1` through `22`, `X`, and `Y`, optionally prefixed by `chr`, are scheduled.
+The no-coordinate compatibility scan is disabled and all requested threads
+can process primary-reference windows. Mitochondrial, alt, decoy, random,
+unplaced, and other contig names are excluded.
+
 Adjacent region queries may both fetch a read that spans their boundary.
 TelSeq assigns each alignment to the unique window containing its start
 coordinate, preventing duplicate contributions while allowing large
@@ -197,6 +203,29 @@ printf '%s\n' /data/sample1.bam /data/sample2.bam | \
 When multiple BAMs are supplied, TelSeq processes them one at a time. The
 thread count applies to the BAM currently being scanned.
 
+### Restrict analysis to human primary chromosomes
+
+Use the strict primary-reference filter when non-primary reads must not
+contribute to the result:
+
+```bash
+telseq -t 23 --primary-chromosomes-only -r 151 sample.bam \
+    > sample.primary.telseq.tsv \
+    2> sample.primary.telseq.log
+```
+
+Accepted names are exactly `1`–`22`, `X`, `Y`, `chr1`–`chr22`, `chrX`, and
+`chrY`. Names such as `chr1_KI270706v1_random`, `chrUn_*`, `chrM`, and `MT`
+do not match. A BAM with no recognized primary names fails with an explicit
+error instead of silently producing an empty result.
+
+This mode intentionally changes TelSeq counting semantics: no-coordinate and
+non-primary-reference reads are excluded, and the inherited extra EOF record
+is not reproduced. Telomeric reads are often unmapped or placed on
+non-primary references, so filtered `LENGTH_ESTIMATE` values are not directly
+comparable with stock/default TelSeq results. The default remains unchanged
+and stock-compatible.
+
 ### Output destination and logs
 
 Results are written to standard output and progress messages to standard
@@ -220,6 +249,7 @@ telseq -t 22 -r 151 -o sample.telseq.tsv sample.bam
 | --- | ---: | --- |
 | `-t INT`, `--threads=INT` | `1` | Threads requested for one BAM. Valid range: 1–1024. Values greater than 1 require a coordinate-sorted, indexed BAM. |
 | `--reference-window-size INT` | `25000000` | Window size in bases for indexed mapped-reference tasks. Use `0` to restore whole-reference tasks; otherwise valid from 1,000 to 1,000,000,000. |
+| `--primary-chromosomes-only` | off | Analyze only exact human autosomes 1–22 and sex chromosomes X/Y, with an optional `chr` prefix. Excludes all other references and no-coordinate reads. |
 | `--profile-references` | off | With `-t > 1`, write one tab-separated timing record per mapped-reference window task to stderr. |
 | `-r INT` | `100` | Read length in bases. Controls the supported motif-count range and therefore the number of `TEL` columns. |
 | `-k INT` | `7` | Minimum number of `TTAGGG` or `CCCTAA` repeats for a read to contribute to the telomeric-read numerator. |

@@ -62,9 +62,11 @@ static const char *TELSEQ_USAGE_MESSAGE =
 "                            the total number of reads in read group. Default is to output each readgroup separately.\n"
 "   -u                       ignore read groups. Treat all reads in BAM as if they were from a same read group.\n"
 "   -t, --threads=INT        number of threads for one coordinate-sorted, indexed BAM. default = 1.\n"
-"                            Values greater than 1 reserve one compatibility scanner; remaining workers use the index.\n"
+"                            Values greater than 1 reserve one compatibility scanner unless strict primary filtering is enabled.\n"
 "   --reference-window-size=INT\n"
 "                            split long references into windows of this many bases. default = 25000000; 0 disables.\n"
+"   --primary-chromosomes-only\n"
+"                            analyse only human autosomes 1-22 and sex chromosomes X/Y; excludes contigs and no-coordinate reads.\n"
 "   --profile-references     emit per-reference worker timing records to standard error. requires -t > 1.\n"
 "   -k                       threshold of the amount of TTAGGG/CCCTAA repeats in read for a read to be considered telomeric. default = 7.\n"
 "\nTesting functions\n------------\n"
@@ -89,6 +91,7 @@ namespace opt
     static bool onebam = false; // whether to consider all bams as one bam
     static unsigned int threads = 1;
     static int referenceWindowSize = 25000000;
+    static bool primaryChromosomesOnly = false;
     static bool profileReferences = false;
     static int tel_k= ScanParameters::TEL_MOTIF_CUTOFF;
     static std::string unknown = "UNKNOWN";
@@ -102,6 +105,7 @@ static const char* shortopts = "f:o:k:z:e:r:p:t:Hhvmuw";
 enum {
     OPT_HELP = 1,
     OPT_VERSION,
+    OPT_PRIMARY_CHROMOSOMES_ONLY,
     OPT_PROFILE_REFERENCES,
     OPT_REFERENCE_WINDOW_SIZE
 };
@@ -112,6 +116,7 @@ static const struct option longopts[] = {
     { "exomebed",		optional_argument, NULL, 'e' },
     { "threads",            required_argument, NULL, 't' },
     { "reference-window-size", required_argument, NULL, OPT_REFERENCE_WINDOW_SIZE },
+    { "primary-chromosomes-only", no_argument, NULL, OPT_PRIMARY_CHROMOSOMES_ONLY },
     { "profile-references", no_argument,       NULL, OPT_PROFILE_REFERENCES },
     { "help",               no_argument,       NULL, OPT_HELP },
     { "version",            no_argument,       NULL, OPT_VERSION },
@@ -224,6 +229,31 @@ typedef std::unique_ptr<bam_hdr_t, SamHeaderDeleter> SamHeaderPtr;
 typedef std::unique_ptr<hts_idx_t, HtsIndexDeleter> HtsIndexPtr;
 typedef std::unique_ptr<hts_itr_t, HtsIteratorDeleter> HtsIteratorPtr;
 typedef std::unique_ptr<bam1_t, BamRecordDeleter> BamRecordPtr;
+
+static bool is_primary_human_chromosome(const std::string& referenceName)
+{
+    const std::string chromosome =
+        referenceName.compare(0, 3, "chr") == 0
+            ? referenceName.substr(3)
+            : referenceName;
+
+    if (chromosome == "X" || chromosome == "Y") {
+        return true;
+    }
+    if (chromosome.empty() || chromosome.size() > 2 ||
+        (chromosome.size() > 1 && chromosome[0] == '0')) {
+        return false;
+    }
+
+    int number = 0;
+    for (std::size_t i = 0; i < chromosome.size(); ++i) {
+        if (chromosome[i] < '0' || chromosome[i] > '9') {
+            return false;
+        }
+        number = number * 10 + (chromosome[i] - '0');
+    }
+    return number >= 1 && number <= 22;
+}
 
 static uint64_t estimate_task_records(
     const uint64_t referenceRecords,
@@ -529,9 +559,15 @@ static bool scan_bam_parallel(
 
     std::vector<ReferenceTask> tasks;
     tasks.reserve(references.size());
+    std::size_t selectedReferenceCount = 0;
     for (int refID = 0;
          refID < static_cast<int>(references.size());
          ++refID) {
+        if (opt::primaryChromosomesOnly &&
+            !is_primary_human_chromosome(references[refID].RefName)) {
+            continue;
+        }
+        selectedReferenceCount += 1;
         const int refLength = references[refID].RefLength;
         if (opt::referenceWindowSize == 0 ||
             refLength <= opt::referenceWindowSize) {
@@ -566,6 +602,13 @@ static bool scan_bam_parallel(
         }
     }
 
+    if (tasks.empty()) {
+        std::cerr << "Error: --primary-chromosomes-only found no exact "
+                  << "human primary chromosome names (1-22, X, Y, with "
+                  << "optional chr prefix) in " << bamPath << ".\n";
+        return false;
+    }
+
     // High estimated-record windows start first. Estimates are proportional
     // within a reference, so ties retain reference and coordinate order and
     // exome search hints never move backwards. Workers fetch another window
@@ -588,11 +631,17 @@ static bool scan_bam_parallel(
             return left.begin < right.begin;
         });
 
-    // One thread uses HTSlib's no-coordinate index iterator for unplaced
-    // records and the legacy final-record contribution. The remaining threads
-    // process mapped reference tasks through the index.
+    // Compatibility mode reserves one thread for the no-coordinate tail and
+    // legacy final-record contribution. Strict primary-chromosome mode omits
+    // that tail and makes every requested thread available to indexed tasks.
+    const bool compatibilityScannerEnabled =
+        !opt::primaryChromosomesOnly;
+    const unsigned int compatibilityThreadCount =
+        compatibilityScannerEnabled ? 1 : 0;
     const std::size_t mappedWorkerCount =
-        std::min<std::size_t>(opt::threads - 1, tasks.size());
+        std::min<std::size_t>(
+            opt::threads - compatibilityThreadCount,
+            tasks.size());
     std::vector<ResultMap> workerResults(mappedWorkerCount, emptyResultMap);
     std::vector<uint64_t> workerScanned(mappedWorkerCount, 0);
     std::vector<uint64_t> workerProcessed(mappedWorkerCount, 0);
@@ -615,16 +664,29 @@ static bool scan_bam_parallel(
     std::vector<std::thread> workers;
     workers.reserve(mappedWorkerCount);
 
-    std::cerr << "Indexed parallel scan using " << mappedWorkerCount
-              << " mapped-reference workers and 1 HTSlib compatibility scanner "
-              << "across " << tasks.size() << " mapped-reference tasks from "
-              << references.size() << " references; window size "
-              << opt::referenceWindowSize << " bp; task priority "
-              << (haveReferenceStatistics ? "indexed record estimate"
-                                           : "genomic length")
-              << "\n";
+    if (compatibilityScannerEnabled) {
+        std::cerr << "Indexed parallel scan using " << mappedWorkerCount
+                  << " mapped-reference workers and 1 HTSlib compatibility scanner "
+                  << "across " << tasks.size() << " mapped-reference tasks from "
+                  << references.size() << " references; window size "
+                  << opt::referenceWindowSize << " bp; task priority "
+                  << (haveReferenceStatistics ? "indexed record estimate"
+                                               : "genomic length")
+                  << "\n";
+    } else {
+        std::cerr << "Indexed primary-chromosome scan using "
+                  << mappedWorkerCount << " workers across " << tasks.size()
+                  << " tasks from " << selectedReferenceCount << " of "
+                  << references.size() << " references; window size "
+                  << opt::referenceWindowSize << " bp; task priority "
+                  << (haveReferenceStatistics ? "indexed record estimate"
+                                               : "genomic length")
+                  << "; compatibility scanner disabled\n";
+    }
 
-    std::thread tailWorker([&]() {
+    std::thread tailWorker;
+    if (compatibilityScannerEnabled) {
+        tailWorker = std::thread([&]() {
         try {
             SamFilePtr reader(sam_open(bamPath.c_str(), "rb"));
             if (!reader) {
@@ -796,7 +858,8 @@ static bool scan_bam_parallel(
             tailError = "unknown no-coordinate scanner exception";
             failed.store(true);
         }
-    });
+        });
+    }
 
     for (std::size_t workerID = 0;
          workerID < mappedWorkerCount;
@@ -901,7 +964,9 @@ static bool scan_bam_parallel(
     for (std::size_t i = 0; i < workers.size(); ++i) {
         workers[i].join();
     }
-    tailWorker.join();
+    if (tailWorker.joinable()) {
+        tailWorker.join();
+    }
 
     if (failed.load()) {
         if (!tailError.empty()) {
@@ -985,11 +1050,17 @@ static bool scan_bam_parallel(
         }
     }
 
-    std::cerr << "[scan] HTSlib compatibility scanner fetched "
-              << tailIndexedFetched << " indexed BAM records: "
-              << tailNoCoordinateFetched << " no-coordinate, "
-              << tailFallbackFetched << " final-reference fallback; "
-              << "full sequential scans: 0\n";
+    if (compatibilityScannerEnabled) {
+        std::cerr << "[scan] HTSlib compatibility scanner fetched "
+                  << tailIndexedFetched << " indexed BAM records: "
+                  << tailNoCoordinateFetched << " no-coordinate, "
+                  << tailFallbackFetched << " final-reference fallback; "
+                  << "full sequential scans: 0\n";
+    } else {
+        std::cerr << "[scan] compatibility scanner skipped: "
+                  << "--primary-chromosomes-only excludes no-coordinate "
+                  << "and non-primary-reference reads\n";
+    }
     std::cerr << "[scan] parallel workers processed " << totalProcessed
               << " reads after filters\n";
     return true;
@@ -1050,7 +1121,34 @@ int scanBam()
 
       // get bam headers
       const BamTools::SamHeader header = pBamReader ->GetHeader();
+      const BamTools::RefVector bamReferences =
+          pBamReader->GetReferenceData();
       bool rggroups=false;
+
+      if(opt::primaryChromosomesOnly){
+        bool foundPrimaryChromosome = false;
+        for(std::size_t refID = 0;
+            refID < bamReferences.size();
+            ++refID){
+          if(is_primary_human_chromosome(bamReferences[refID].RefName)){
+            foundPrimaryChromosome = true;
+            break;
+          }
+        }
+        if(!foundPrimaryChromosome){
+          std::cerr << "Error: --primary-chromosomes-only found no exact "
+                    << "human primary chromosome names (1-22, X, Y, with "
+                    << "optional chr prefix) in " << opt::bamlist[i] << ".\n";
+          pBamReader->Close();
+          delete pBamReader;
+          return 1;
+        }
+        std::cerr << "Primary-chromosome filter enabled: excluding "
+                  << "mitochondrial, alt, decoy, unplaced, and "
+                  << "no-coordinate reads\n";
+        std::cerr << "Warning: filtered LENGTH_ESTIMATE values are not "
+                  << "directly comparable with stock/default TelSeq output\n";
+      }
 
       if(opt::ignorerg){ // ignore read groups
 	      std::cerr << "Treat all reads in BAM as if they were from a same sample" << std::endl;
@@ -1126,6 +1224,16 @@ int scanBam()
       while(!done) {
 	ntotal ++;
 	done = !pBamReader -> GetNextAlignment(record1);
+	if(opt::primaryChromosomesOnly){
+	  // Filtered mode intentionally does not reproduce the inherited EOF
+	  // duplicate, and no-coordinate records have RefID -1.
+	  if(done || record1.RefID < 0 ||
+	     record1.RefID >= static_cast<int>(bamReferences.size()) ||
+	     !is_primary_human_chromosome(
+	         bamReferences[record1.RefID].RefName)){
+	    continue;
+	  }
+	}
 	std::string tag = opt::unknown;
 	if(rggroups){
 	  // skip reads that do not have read group tag
@@ -1509,6 +1617,9 @@ void parseScanOptions(int argc, char** argv)
                 break;
             case OPT_PROFILE_REFERENCES:
                 opt::profileReferences = true;
+                break;
+            case OPT_PRIMARY_CHROMOSOMES_ONLY:
+                opt::primaryChromosomesOnly = true;
                 break;
             case OPT_REFERENCE_WINDOW_SIZE:
                 {

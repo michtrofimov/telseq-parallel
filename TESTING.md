@@ -281,6 +281,12 @@ The synthetic compatibility test asserts that profiling emits one well-formed
 row per task, prioritizes a deliberately dense short reference, and does not
 change stdout. Its boundary fixture expands one reference into three windows
 and checks the exact read count owned by each.
+
+The same gate also runs `--primary-chromosomes-only` against both `1`/`X`
+and `chr1`/`chrX` naming styles. Serial and parallel filtered output must be
+byte-identical; alt, mitochondrial, ordinary contig, and no-coordinate reads
+must be absent; and the parallel log must confirm that all requested threads
+are available to the 24 primary references with no compatibility scanner.
 The `master` image is a moving development tag published only after the
 container test gates pass; it is not a numbered release.
 

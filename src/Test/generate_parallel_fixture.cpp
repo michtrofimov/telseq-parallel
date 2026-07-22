@@ -46,10 +46,11 @@ static BamTools::BamAlignment make_alignment(
 
 int main(int argc, char** argv)
 {
-    if (argc < 2 || argc > 6) {
+    if (argc < 2 || argc > 7) {
         std::cerr << "Usage: " << argv[0]
                   << " OUTPUT.bam [READS_PER_REFERENCE [READ_LENGTH "
-                  << "[NO_COORDINATE_READS [WINDOW_BOUNDARY_READS]]]]\n";
+                  << "[NO_COORDINATE_READS [WINDOW_BOUNDARY_READS "
+                  << "[PRIMARY_REFERENCE_STYLE]]]]]\n";
         return 2;
     }
 
@@ -60,11 +61,15 @@ int main(int argc, char** argv)
         argc >= 5 ? std::atoi(argv[4]) : 8;
     const bool includeWindowBoundaryRecords =
         argc >= 6 ? std::atoi(argv[5]) != 0 : false;
+    const int primaryReferenceStyle =
+        argc >= 7 ? std::atoi(argv[6]) : 0;
     if (readsPerReference < 1 || readLength < 100 || readLength > 100000 ||
-        requestedNoCoordinateRecords < 0) {
+        requestedNoCoordinateRecords < 0 || primaryReferenceStyle < 0 ||
+        primaryReferenceStyle > 2) {
         std::cerr << "READS_PER_REFERENCE must be positive and READ_LENGTH "
                   << "must be between 100 and 100000; NO_COORDINATE_READS "
-                  << "must not be negative\n";
+                  << "must not be negative; PRIMARY_REFERENCE_STYLE must "
+                  << "be 0, 1, or 2\n";
         return 2;
     }
 
@@ -84,7 +89,26 @@ int main(int argc, char** argv)
     header << "@HD\tVN:1.0\tSO:coordinate\n";
 
     for (int refID = 0; refID < referenceCount; ++refID) {
-        const std::string name = "contig" + std::to_string(refID);
+        std::string name = "contig" + std::to_string(refID);
+        if (primaryReferenceStyle != 0 && refID < 24) {
+            std::string chromosome;
+            if (refID < 22) {
+                chromosome = std::to_string(refID + 1);
+            } else {
+                chromosome = refID == 22 ? "X" : "Y";
+            }
+            name = primaryReferenceStyle == 2
+                ? "chr" + chromosome
+                : chromosome;
+        } else if (primaryReferenceStyle == 1 && refID == 24) {
+            name = "1_KI270706v1_random";
+        } else if (primaryReferenceStyle == 1 && refID == 25) {
+            name = "MT";
+        } else if (primaryReferenceStyle == 2 && refID == 24) {
+            name = "chr1_KI270706v1_random";
+        } else if (primaryReferenceStyle == 2 && refID == 25) {
+            name = "chrM";
+        }
         const int currentReferenceLength =
             includeWindowBoundaryRecords && refID == 0
                 ? boundaryReferenceLength

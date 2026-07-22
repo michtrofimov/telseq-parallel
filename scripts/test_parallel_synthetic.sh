@@ -265,6 +265,95 @@ if [ "$window_counts" != "$(printf '1136\t1125\t3')" ]; then
     exit 32
 fi
 
+# Strict human-primary filtering keeps exact 1-22/X/Y references, excludes
+# similarly prefixed alt names, mitochondrial references, ordinary contigs,
+# and the no-coordinate tail. It also uses every requested thread because the
+# compatibility scanner is intentionally unnecessary in this mode.
+primary_bam="$test_dir/primary-reference-fixture.bam"
+primary_serial_stdout="$test_dir/primary-serial.stdout"
+primary_parallel_stdout="$test_dir/primary-parallel.stdout"
+primary_parallel_stderr="$test_dir/primary-parallel.stderr"
+"$fixture_generator" "$primary_bam" 20 100 8 0 1
+
+if ! "$new_telseq" --primary-chromosomes-only -t 1 "$primary_bam" \
+    >"$primary_serial_stdout" \
+    2>"$test_dir/primary-serial.stderr"; then
+    echo "FAIL[60]: serial primary-chromosome scan failed" >&2
+    exit 60
+fi
+if ! "$new_telseq" --primary-chromosomes-only --profile-references \
+    -t 22 "$primary_bam" \
+    >"$primary_parallel_stdout" \
+    2>"$primary_parallel_stderr"; then
+    echo "FAIL[61]: parallel primary-chromosome scan failed" >&2
+    sed -n '1,200p' "$primary_parallel_stderr" >&2
+    exit 61
+fi
+
+if ! cmp -s "$primary_serial_stdout" "$primary_parallel_stdout"; then
+    diff -u "$primary_serial_stdout" "$primary_parallel_stdout" \
+        >"$test_dir/primary-filter.diff" || true
+    echo "FAIL: serial and parallel primary filters differ" >&2
+    exit 62
+fi
+
+if ! grep -Fqx \
+    "Indexed primary-chromosome scan using 22 workers across 24 tasks from 24 of 64 references; window size 25000000 bp; task priority indexed record estimate; compatibility scanner disabled" \
+    "$primary_parallel_stderr"; then
+    echo "FAIL: primary filter did not select the expected worker layout" >&2
+    exit 63
+fi
+if ! grep -Fqx \
+    "[scan] compatibility scanner skipped: --primary-chromosomes-only excludes no-coordinate and non-primary-reference reads" \
+    "$primary_parallel_stderr"; then
+    echo "FAIL: primary filter did not disable compatibility scanning" >&2
+    exit 64
+fi
+
+if ! awk -F '\t' '
+    $1 == "[reference-profile]" && $2 ~ /^[0-9]+$/ {
+        rows += 1
+        if ($4 < 0 || $4 > 23) invalid = 1
+        if ($2 == 0 && ($4 != 6 || $5 != "7" || $9 != 21 || $10 != 21)) {
+            invalid = 1
+        }
+    }
+    END { if (rows != 24 || invalid) exit 1 }
+' "$primary_parallel_stderr"; then
+    echo "FAIL: primary profile contains a non-primary reference" >&2
+    exit 65
+fi
+
+primary_counts=$(awk -F '\t' '$1 == "rg1" {
+    print $4 "\t" $5 "\t" $6
+}' "$primary_parallel_stdout")
+if [ "$primary_counts" != "$(printf '421\t420\t1')" ]; then
+    echo "FAIL: primary filter retained contig or no-coordinate reads" >&2
+    echo "Observed: $primary_counts" >&2
+    exit 66
+fi
+
+# Repeat with chr-prefixed primary names and chr-prefixed alt/mitochondrial
+# distractors to cover the other common human-reference naming convention.
+prefixed_primary_bam="$test_dir/chr-primary-reference-fixture.bam"
+prefixed_primary_stdout="$test_dir/chr-primary-parallel.stdout"
+"$fixture_generator" "$prefixed_primary_bam" 20 100 8 0 2
+if ! "$new_telseq" --primary-chromosomes-only -t 22 \
+    "$prefixed_primary_bam" \
+    >"$prefixed_primary_stdout" \
+    2>"$test_dir/chr-primary-parallel.stderr"; then
+    echo "FAIL[67]: chr-prefixed primary-chromosome scan failed" >&2
+    exit 67
+fi
+prefixed_primary_counts=$(awk -F '\t' '$1 == "rg1" {
+    print $4 "\t" $5 "\t" $6
+}' "$prefixed_primary_stdout")
+if [ "$prefixed_primary_counts" != "$(printf '421\t420\t1')" ]; then
+    echo "FAIL: chr-prefixed primary filter retained non-primary reads" >&2
+    echo "Observed: $prefixed_primary_counts" >&2
+    exit 68
+fi
+
 observed_counts=$(awk -F '\t' '$1 == "rg1" {
     print $4 "\t" $5 "\t" $6
 }' "$results_dir/stock.stdout")
@@ -323,4 +412,5 @@ echo "Fast tail access: 8 indexed records fetched; 0 full sequential scans"
 echo "No-tail fallback: 20 final-reference records fetched; stock output matched"
 echo "Reference profile: 64 timed tasks with index estimates; standard output unchanged"
 echo "Window ownership: boundary-spanning records counted exactly once"
+echo "Primary filter: 1-22/X/Y and chr-prefixed aliases only; serial/parallel matched"
 echo "Artifacts: $test_dir"

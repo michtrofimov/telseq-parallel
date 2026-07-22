@@ -23,6 +23,13 @@
 - mapped-reference tasks are prioritized by BAI record-count estimates so
   dense short references start early instead of becoming late stragglers;
 - reference profiles include the record-count estimate used by the scheduler.
+- `--primary-chromosomes-only` restricts analysis to exact human autosomes
+  1-22 and sex chromosomes X/Y (with optional `chr` prefix), excluding all
+  contigs, mitochondrial references, and no-coordinate reads;
+- strict primary-chromosome mode disables the compatibility scanner and makes
+  every requested thread available to indexed primary-reference windows;
+- synthetic tests cover unprefixed and `chr`-prefixed primary names, reject
+  alt/mitochondrial/contig distractors, and compare serial and parallel output.
 
 ## 0.2.0 - 2026-07-22
 
