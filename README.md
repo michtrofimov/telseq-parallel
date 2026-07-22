@@ -27,6 +27,16 @@ docker run --rm \
     --version
 ```
 
+For cluster experiments against the latest tested `master` commit, use the
+development image:
+
+```bash
+docker pull ghcr.io/michtrofimov/telseq-parallel:master
+```
+
+This moving tag is published only after the same container build and test
+gates as a release image. Use a numbered release tag for production workflows.
+
 See [Using the Docker image](#using-the-docker-image) for a complete BAM
 example.
 

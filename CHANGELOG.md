@@ -11,6 +11,8 @@
 - `--profile-references` emits per-reference scheduler assignment, read counts,
   and timing offsets to stderr for diagnosing parallel scaling limits without
   changing result stdout.
+- successful `master` builds publish a moving GHCR development image for
+  cluster profiling without creating a numbered release.
 
 ## 0.2.0 - 2026-07-22
 

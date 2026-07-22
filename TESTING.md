@@ -261,7 +261,7 @@ pass it after `--` with the other TelSeq arguments:
 ```bash
 scripts/compare_and_benchmark_docker.sh \
     --reference-output /path/to/stock-result.tsv \
-    telseq-parallel:profile \
+    ghcr.io/michtrofimov/telseq-parallel:master \
     /path/to/sample.bam \
     12 23 46 \
     -- --profile-references -r 151
@@ -269,6 +269,8 @@ scripts/compare_and_benchmark_docker.sh \
 
 The synthetic compatibility test asserts that profiling emits exactly one
 well-formed row for each of its 64 references and does not change stdout.
+The `master` image is a moving development tag published only after the
+container test gates pass; it is not a numbered release.
 
 ## Container validation
 
