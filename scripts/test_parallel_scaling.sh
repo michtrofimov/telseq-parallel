@@ -40,7 +40,11 @@ run_timed() {
     stderr="$test_dir/threads-$threads-run-$run.stderr"
 
     start_ns=$(date +%s%N)
-    "$telseq" -t "$threads" -u "$bam" >"$stdout" 2>"$stderr"
+    if ! "$telseq" -t "$threads" -u "$bam" >"$stdout" 2>"$stderr"; then
+        echo "FAIL[50]: -t $threads execution failed" >&2
+        sed -n '1,200p' "$stderr" >&2
+        return 50
+    fi
     end_ns=$(date +%s%N)
 
     awk -v start="$start_ns" -v end="$end_ns" \
@@ -60,9 +64,12 @@ for run in 1 2 3; do
     run_timed 4 "$run" >>"$test_dir/threads-4.times"
 done
 
-cmp \
+if ! cmp -s \
     "$test_dir/threads-2-run-1.stdout" \
-    "$test_dir/threads-4-run-1.stdout"
+    "$test_dir/threads-4-run-1.stdout"; then
+    echo "FAIL[51]: -t 2 and -t 4 outputs differ" >&2
+    exit 51
+fi
 
 median_seconds() {
     sort -n "$1" | awk 'NR == 2 { print; exit }'
@@ -77,7 +84,15 @@ if ! awk -v slower="$threads_2_median" -v faster="$threads_4_median" \
     echo "-t 2 median: $threads_2_median seconds" >&2
     echo "-t 4 median: $threads_4_median seconds" >&2
     echo "Artifacts: $test_dir" >&2
-    exit 1
+    if awk -v slower="$threads_2_median" -v faster="$threads_4_median" \
+        'BEGIN { exit !(faster <= slower * 1.05) }'; then
+        exit 52
+    elif awk -v slower="$threads_2_median" -v faster="$threads_4_median" \
+        'BEGIN { exit !(faster <= slower * 1.20) }'; then
+        exit 53
+    else
+        exit 54
+    fi
 fi
 
 speedup=$(awk -v slower="$threads_2_median" -v faster="$threads_4_median" \
