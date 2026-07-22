@@ -151,12 +151,16 @@ telseq -t 22 -r 151 sample.bam > sample.telseq.tsv
 ```
 
 For `-t > 1`, one requested thread is reserved for a short HTSlib compatibility
-scan and the remaining threads consume complete reference-sequence tasks
-dynamically. For example, `-t 22` permits up to 21 indexed reference workers
-plus the compatibility scanner. The scanner retrieves the no-coordinate tail
-directly through the BAI instead of reading the complete BAM. A chromosome is
-not permanently assigned to a particular worker and is not divided between
-multiple workers.
+scan and the remaining threads consume indexed reference-window tasks
+dynamically. References longer than 25 million bases are divided into windows
+by default. For example, `-t 22` permits up to 21 indexed window workers plus
+the compatibility scanner. The scanner retrieves the no-coordinate tail
+directly through the BAI instead of reading the complete BAM.
+
+Adjacent region queries may both fetch a read that spans their boundary.
+TelSeq assigns each alignment to the unique window containing its start
+coordinate, preventing duplicate contributions while allowing large
+chromosomes to use multiple workers.
 
 ### Multiple BAMs
 
@@ -209,7 +213,8 @@ telseq -t 22 -r 151 -o sample.telseq.tsv sample.bam
 | Option | Default | Meaning |
 | --- | ---: | --- |
 | `-t INT`, `--threads=INT` | `1` | Threads requested for one BAM. Valid range: 1–1024. Values greater than 1 require a coordinate-sorted, indexed BAM. |
-| `--profile-references` | off | With `-t > 1`, write one tab-separated timing record per mapped-reference task to stderr. |
+| `--reference-window-size INT` | `25000000` | Window size in bases for indexed mapped-reference tasks. Use `0` to restore whole-reference tasks; otherwise valid from 1,000 to 1,000,000,000. |
+| `--profile-references` | off | With `-t > 1`, write one tab-separated timing record per mapped-reference window task to stderr. |
 | `-r INT` | `100` | Read length in bases. Controls the supported motif-count range and therefore the number of `TEL` columns. |
 | `-k INT` | `7` | Minimum number of `TTAGGG` or `CCCTAA` repeats for a read to contribute to the telomeric-read numerator. |
 | `-f FILE`, `--bamlist=FILE` | — | Read BAM paths from a one-column file. Positional BAM arguments are ignored when this is used. |
@@ -240,9 +245,10 @@ telseq -t 23 --profile-references -r 151 sample.bam \
 ```
 
 Each `[reference-profile]` stderr row reports the scheduler task and worker
-IDs, reference ID/name/length, records scanned and processed after filters,
-start and end offsets from the parallel scan epoch, and elapsed seconds. Rows
-are emitted after workers finish, so concurrent messages cannot interleave.
+IDs, reference ID/name/length, genomic window start/end, records scanned and
+processed after filters, start and end offsets from the parallel scan epoch,
+and elapsed seconds. Rows are emitted after workers finish, so concurrent
+messages cannot interleave.
 
 ## Output
 
@@ -335,7 +341,7 @@ minutes at `-t 80`, a 9.85× speedup and an 89.85% reduction.
 
 ![TelSeq Parallel v0.2 real WGS wall time by requested thread count](benchmarks/real-wgs-2026-07-22-htslib/wall-time-vs-threads.svg)
 
-The practical knee was `-t 23`, which finished in 5.71 minutes. Increasing the
+The version 0.2.0 practical knee was `-t 23`, which finished in 5.71 minutes. Increasing the
 request from 23 to 80 threads saved only 6.74 seconds, or 1.97%. At `-t 23`,
 22 mapped-reference workers can already process most long human chromosomes
 concurrently. Because reference tasks are not divided further, the slowest

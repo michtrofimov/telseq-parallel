@@ -13,6 +13,13 @@
   changing result stdout.
 - successful `master` builds publish a moving GHCR development image for
   cluster profiling without creating a numbered release.
+- long references are divided into dynamically scheduled indexed windows,
+  with alignment-start ownership preventing duplicate counts for reads that
+  overlap adjacent windows;
+- `--reference-window-size` tunes window granularity or disables splitting for
+  direct comparison with the previous whole-reference scheduler;
+- synthetic boundary coverage verifies byte-identical output for reads that
+  end at, span, start at, or start immediately after a window boundary.
 
 ## 0.2.0 - 2026-07-22
 

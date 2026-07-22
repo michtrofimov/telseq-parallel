@@ -52,6 +52,9 @@ and `-t 44`. Every stdout file must be byte-identical. It also checks that:
   reports zero complete sequential scans, and retains the legacy EOF record;
 - a second no-tail fixture fetches only the 20 records on its highest populated
   reference to recover the final mapped record and matches stock output; and
+- a long-reference fixture splits at 25-million-base boundaries and proves
+  that reads ending at, spanning, and starting at a boundary contribute
+  exactly once; and
 - the output contains `Total=1130`, `Mapped=1120`, and `Duplicates=3`.
 
 The fixture contains 1,129 physical records. The expected `Total` of 1,130
@@ -243,8 +246,9 @@ make comparisons meaningful:
 
 The requested thread count is not a chromosome count. For `-t N`, one thread
 is reserved for the HTSlib compatibility scanner and up to `N-1` workers
-dynamically consume whole-reference tasks. More threads than useful reference
-tasks do not create more parallel work.
+dynamically consume indexed reference-window tasks. The default window size is
+25 million bases; use `--reference-window-size` to test another size or `0` to
+reproduce the whole-reference scheduler.
 
 The compatibility scanner uses the BAI to retrieve the no-coordinate tail
 directly. Its progress log reports how many indexed records it fetched and
@@ -254,9 +258,9 @@ BAM a second time.
 
 To inspect whole-reference scheduling, add `--profile-references` to a
 parallel run. Its tab-separated `[reference-profile]` rows are written only to
-stderr and include per-task worker assignment, reference metadata, read
-counts, start/end offsets, and elapsed time. For the Docker benchmark wrapper,
-pass it after `--` with the other TelSeq arguments:
+stderr and include per-task worker assignment, reference and window metadata,
+read counts, start/end time offsets, and elapsed time. For the Docker benchmark
+wrapper, pass it after `--` with the other TelSeq arguments:
 
 ```bash
 scripts/compare_and_benchmark_docker.sh \
@@ -267,8 +271,9 @@ scripts/compare_and_benchmark_docker.sh \
     -- --profile-references -r 151
 ```
 
-The synthetic compatibility test asserts that profiling emits exactly one
-well-formed row for each of its 64 references and does not change stdout.
+The synthetic compatibility test asserts that profiling emits one well-formed
+row per task and does not change stdout. Its boundary fixture expands one
+reference into three windows and checks the exact read count owned by each.
 The `master` image is a moving development tag published only after the
 container test gates pass; it is not a numbered release.
 

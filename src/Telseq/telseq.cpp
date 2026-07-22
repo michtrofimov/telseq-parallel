@@ -63,6 +63,8 @@ static const char *TELSEQ_USAGE_MESSAGE =
 "   -u                       ignore read groups. Treat all reads in BAM as if they were from a same read group.\n"
 "   -t, --threads=INT        number of threads for one coordinate-sorted, indexed BAM. default = 1.\n"
 "                            Values greater than 1 reserve one compatibility scanner; remaining workers use the index.\n"
+"   --reference-window-size=INT\n"
+"                            split long references into windows of this many bases. default = 25000000; 0 disables.\n"
 "   --profile-references     emit per-reference worker timing records to standard error. requires -t > 1.\n"
 "   -k                       threshold of the amount of TTAGGG/CCCTAA repeats in read for a read to be considered telomeric. default = 7.\n"
 "\nTesting functions\n------------\n"
@@ -86,6 +88,7 @@ namespace opt
     static bool ignorerg = false;
     static bool onebam = false; // whether to consider all bams as one bam
     static unsigned int threads = 1;
+    static int referenceWindowSize = 25000000;
     static bool profileReferences = false;
     static int tel_k= ScanParameters::TEL_MOTIF_CUTOFF;
     static std::string unknown = "UNKNOWN";
@@ -96,13 +99,19 @@ namespace opt
 
 static const char* shortopts = "f:o:k:z:e:r:p:t:Hhvmuw";
 
-enum { OPT_HELP = 1, OPT_VERSION, OPT_PROFILE_REFERENCES };
+enum {
+    OPT_HELP = 1,
+    OPT_VERSION,
+    OPT_PROFILE_REFERENCES,
+    OPT_REFERENCE_WINDOW_SIZE
+};
 
 static const struct option longopts[] = {
 	{ "bamlist",		optional_argument, NULL, 'f' },
     { "output-dir",		optional_argument, NULL, 'o' },
     { "exomebed",		optional_argument, NULL, 'e' },
     { "threads",            required_argument, NULL, 't' },
+    { "reference-window-size", required_argument, NULL, OPT_REFERENCE_WINDOW_SIZE },
     { "profile-references", no_argument,       NULL, OPT_PROFILE_REFERENCES },
     { "help",               no_argument,       NULL, OPT_HELP },
     { "version",            no_argument,       NULL, OPT_VERSION },
@@ -135,6 +144,8 @@ struct ReferenceTask
 {
     int refID;
     int refLength;
+    int begin;
+    int end;
 };
 
 struct ReferenceProfile
@@ -447,20 +458,48 @@ static bool scan_bam_parallel(
     for (int refID = 0;
          refID < static_cast<int>(references.size());
          ++refID) {
-        ReferenceTask task;
-        task.refID = refID;
-        task.refLength = references[refID].RefLength;
-        tasks.push_back(task);
+        const int refLength = references[refID].RefLength;
+        if (opt::referenceWindowSize == 0 ||
+            refLength <= opt::referenceWindowSize) {
+            ReferenceTask task;
+            task.refID = refID;
+            task.refLength = refLength;
+            task.begin = 0;
+            task.end = refLength;
+            tasks.push_back(task);
+            continue;
+        }
+
+        for (int begin = 0; begin < refLength; ) {
+            const int remaining = refLength - begin;
+            const int taskLength =
+                std::min(opt::referenceWindowSize, remaining);
+            ReferenceTask task;
+            task.refID = refID;
+            task.refLength = refLength;
+            task.begin = begin;
+            task.end = begin + taskLength;
+            tasks.push_back(task);
+            begin = task.end;
+        }
     }
 
-    // Long references start first. Workers fetch another reference as soon as
-    // they finish, which balances the small/decoy contigs without splitting a
-    // chromosome at overlapping region boundaries.
+    // Long windows start first. Equal-sized windows retain reference and
+    // coordinate order so exome search hints never move backwards within a
+    // reference. Workers fetch another window as soon as they finish.
     std::sort(
         tasks.begin(),
         tasks.end(),
         [](const ReferenceTask& left, const ReferenceTask& right) {
-            return left.refLength > right.refLength;
+            const int leftLength = left.end - left.begin;
+            const int rightLength = right.end - right.begin;
+            if (leftLength != rightLength) {
+                return leftLength > rightLength;
+            }
+            if (left.refID != right.refID) {
+                return left.refID < right.refID;
+            }
+            return left.begin < right.begin;
         });
 
     // One thread uses HTSlib's no-coordinate index iterator for unplaced
@@ -492,7 +531,9 @@ static bool scan_bam_parallel(
 
     std::cerr << "Indexed parallel scan using " << mappedWorkerCount
               << " mapped-reference workers and 1 HTSlib compatibility scanner "
-              << "across " << tasks.size() << " reference tasks\n";
+              << "across " << tasks.size() << " mapped-reference tasks from "
+              << references.size() << " references; window size "
+              << opt::referenceWindowSize << " bp\n";
 
     std::thread tailWorker([&]() {
         try {
@@ -711,9 +752,9 @@ static bool scan_bam_parallel(
                     }
                     const bool positioned = reader.SetRegion(
                         task.refID,
-                        0,
+                        task.begin,
                         task.refID,
-                        task.refLength);
+                        task.end);
 
                     if (!positioned) {
                         workerErrors[workerID] =
@@ -726,6 +767,15 @@ static bool scan_bam_parallel(
 
                     BamTools::BamAlignment record;
                     while (reader.GetNextAlignment(record)) {
+                        // BamTools region queries return alignments that
+                        // overlap a window. Assign ownership by alignment
+                        // start so a spanning record fetched by adjacent
+                        // windows contributes exactly once.
+                        if (record.RefID != task.refID ||
+                            record.Position < task.begin ||
+                            record.Position >= task.end) {
+                            continue;
+                        }
                         workerScanned[workerID] += 1;
                         scan_alignment_parallel(
                             record,
@@ -780,7 +830,8 @@ static bool scan_bam_parallel(
 
     if (opt::profileReferences) {
         std::cerr << "[reference-profile]\ttask\tworker\tref_id\treference"
-                  << "\treference_length\treads_scanned\treads_processed"
+                  << "\treference_length\twindow_start\twindow_end"
+                  << "\treads_scanned\treads_processed"
                   << "\tstart_seconds\tend_seconds\telapsed_seconds\n";
         for (std::size_t taskIndex = 0;
              taskIndex < referenceProfiles.size();
@@ -797,6 +848,8 @@ static bool scan_bam_parallel(
                 << task.refID << "\t"
                 << references[task.refID].RefName << "\t"
                 << task.refLength << "\t"
+                << task.begin << "\t"
+                << task.end << "\t"
                 << profile.readsScanned << "\t"
                 << profile.readsProcessed << "\t"
                 << std::fixed << std::setprecision(6)
@@ -1366,6 +1419,21 @@ void parseScanOptions(int argc, char** argv)
                 break;
             case OPT_PROFILE_REFERENCES:
                 opt::profileReferences = true;
+                break;
+            case OPT_REFERENCE_WINDOW_SIZE:
+                {
+                    int requestedWindowSize = -1;
+                    arg >> requestedWindowSize;
+                    if(!arg || requestedWindowSize < 0 ||
+                       (requestedWindowSize > 0 &&
+                        requestedWindowSize < 1000) ||
+                       requestedWindowSize > 1000000000){
+                        std::cerr << "reference window size must be 0 or an "
+                                  << "integer from 1000 to 1000000000\n";
+                        exit(EXIT_FAILURE);
+                    }
+                    opt::referenceWindowSize = requestedWindowSize;
+                }
                 break;
             case 'p':
 

@@ -116,14 +116,14 @@ if ! TELSEQ_BENCH_OUT="$results_dir" \
 fi
 
 if ! grep -q \
-    "using 21 mapped-reference workers and 1 HTSlib compatibility scanner across 64 reference tasks" \
+    "using 21 mapped-reference workers and 1 HTSlib compatibility scanner across 64 mapped-reference tasks from 64 references; window size 25000000 bp" \
     "$results_dir/threads-22.stderr"; then
     echo "FAIL: -t 22 did not start the expected worker layout" >&2
     exit 11
 fi
 
 if ! grep -q \
-    "using 43 mapped-reference workers and 1 HTSlib compatibility scanner across 64 reference tasks" \
+    "using 43 mapped-reference workers and 1 HTSlib compatibility scanner across 64 mapped-reference tasks from 64 references; window size 25000000 bp" \
     "$results_dir/threads-44.stderr"; then
     echo "FAIL: -t 44 did not start the expected worker layout" >&2
     exit 12
@@ -173,10 +173,11 @@ if ! awk -F '\t' '
     }
     $1 == "[reference-profile]" {
         rows += 1
-        if (NF != 11 || $2 !~ /^[0-9]+$/ || $3 !~ /^[0-9]+$/ ||
+        if (NF != 13 || $2 !~ /^[0-9]+$/ || $3 !~ /^[0-9]+$/ ||
             $3 < 1 || $3 > 21 || $4 !~ /^[0-9]+$/ ||
             $6 !~ /^[0-9]+$/ || $7 !~ /^[0-9]+$/ ||
-            $8 !~ /^[0-9]+$/ || $9 < 0 || $10 < $9 || $11 < 0) {
+            $8 !~ /^[0-9]+$/ || $9 !~ /^[0-9]+$/ ||
+            $10 !~ /^[0-9]+$/ || $11 < 0 || $12 < $11 || $13 < 0) {
             invalid = 1
         }
         seen_reference[$4] += 1
@@ -195,6 +196,68 @@ if ! awk -F '\t' '
     echo "FAIL: per-reference profile is incomplete or malformed" >&2
     sed -n '/^\[reference-profile\]/p' "$profile_stderr" >&2
     exit 27
+fi
+
+# Split one long synthetic reference into three windows. Records ending at,
+# spanning, starting at, and starting immediately after a boundary prove that
+# overlap queries are reduced to exact start-coordinate ownership.
+window_bam="$test_dir/window-boundary-fixture.bam"
+window_stock_stdout="$test_dir/window-boundary-stock.stdout"
+window_parallel_stdout="$test_dir/window-boundary-parallel.stdout"
+window_parallel_stderr="$test_dir/window-boundary-parallel.stderr"
+"$fixture_generator" "$window_bam" 20 100 8 1
+
+if ! "$stock_telseq" "$window_bam" \
+    >"$window_stock_stdout" \
+    2>"$test_dir/window-boundary-stock.stderr"; then
+    echo "FAIL[28]: stock TelSeq failed on window-boundary fixture" >&2
+    exit 28
+fi
+if ! "$new_telseq" --profile-references -t 22 "$window_bam" \
+    >"$window_parallel_stdout" \
+    2>"$window_parallel_stderr"; then
+    echo "FAIL[29]: windowed parallel execution failed" >&2
+    sed -n '1,200p' "$window_parallel_stderr" >&2
+    exit 29
+fi
+
+if ! cmp -s "$window_stock_stdout" "$window_parallel_stdout"; then
+    diff -u "$window_stock_stdout" "$window_parallel_stdout" \
+        >"$test_dir/window-boundary.diff" || true
+    echo "FAIL: window-boundary output differs from stock TelSeq" >&2
+    echo "Diff: $test_dir/window-boundary.diff" >&2
+    exit 30
+fi
+
+if ! awk -F '\t' '
+    $1 == "[reference-profile]" && $2 ~ /^[0-9]+$/ {
+        rows += 1
+        if ($5 == "contig0") {
+            contig_tasks += 1
+            if ($7 == 0 && $8 == 25000000 && $9 == 23) first = 1
+            if ($7 == 25000000 && $8 == 50000000 && $9 == 3) second = 1
+            if ($7 == 50000000 && $8 == 50001100 && $9 == 1) third = 1
+        }
+    }
+    END {
+        if (rows != 66 || contig_tasks != 3 ||
+            !first || !second || !third) {
+            exit 1
+        }
+    }
+' "$window_parallel_stderr"; then
+    echo "FAIL: window ownership duplicated or omitted boundary records" >&2
+    sed -n '/^\[reference-profile\]/p' "$window_parallel_stderr" >&2
+    exit 31
+fi
+
+window_counts=$(awk -F '\t' '$1 == "rg1" {
+    print $4 "\t" $5 "\t" $6
+}' "$window_stock_stdout")
+if [ "$window_counts" != "$(printf '1136\t1125\t3')" ]; then
+    echo "FAIL: unexpected counts in window-boundary fixture" >&2
+    echo "Observed: $window_counts" >&2
+    exit 32
 fi
 
 observed_counts=$(awk -F '\t' '$1 == "rg1" {
@@ -254,4 +317,5 @@ echo "Expected legacy counts: Total=1130 Mapped=1120 Duplicates=3"
 echo "Fast tail access: 8 indexed records fetched; 0 full sequential scans"
 echo "No-tail fallback: 20 final-reference records fetched; stock output matched"
 echo "Reference profile: 64 timed tasks; standard output unchanged"
+echo "Window ownership: boundary-spanning records counted exactly once"
 echo "Artifacts: $test_dir"
