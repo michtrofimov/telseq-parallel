@@ -32,13 +32,47 @@ results_dir="$test_dir/results"
 "$fixture_generator" "$bam"
 
 if ! TELSEQ_BENCH_OUT="$results_dir" \
+    TELSEQ_STOP_ON_MISMATCH=0 \
     "$repo_dir/scripts/compare_and_benchmark.sh" \
         "$stock_telseq" \
         "$new_telseq" \
         "$bam" \
         1 2 22 44; then
-    echo "FAIL[10]: stock compatibility comparison failed" >&2
-    exit 10
+    summary="$results_dir/summary.tsv"
+    run_status() {
+        awk -F '\t' -v label="$1" '$1 == label { print $2; exit }' \
+            "$summary"
+    }
+
+    if [ "$(run_status stock)" != "0" ]; then
+        echo "FAIL[20]: stock TelSeq execution failed" >&2
+        exit 20
+    fi
+
+    diagnostic_code=21
+    for thread_count in 1 2 22 44; do
+        label="threads-$thread_count"
+        if [ "$(run_status "$label")" != "0" ]; then
+            echo "FAIL[$diagnostic_code]: $label execution failed" >&2
+            exit "$diagnostic_code"
+        fi
+        diagnostic_code=$((diagnostic_code + 1))
+    done
+
+    diagnostic_code=31
+    for thread_count in 1 2 22 44; do
+        label="threads-$thread_count"
+        if ! cmp -s \
+            "$results_dir/stock.stdout" \
+            "$results_dir/$label.stdout"; then
+            echo "FAIL[$diagnostic_code]: $label output differs from stock" >&2
+            exit "$diagnostic_code"
+        fi
+        diagnostic_code=$((diagnostic_code + 1))
+    done
+
+    echo "FAIL[39]: compatibility benchmark returned an unexplained failure" >&2
+    exit 39
 fi
 
 if ! grep -q \
