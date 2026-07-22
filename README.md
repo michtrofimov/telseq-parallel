@@ -157,6 +157,12 @@ by default. For example, `-t 22` permits up to 21 indexed window workers plus
 the compatibility scanner. The scanner retrieves the no-coordinate tail
 directly through the BAI instead of reading the complete BAM.
 
+Tasks are prioritized using each reference's mapped and positioned-unmapped
+record totals from the BAM index, apportioned by window length. This starts
+dense short references early instead of leaving them as end-of-run
+stragglers. If an index format does not expose those totals, scheduling falls
+back to genomic-window length.
+
 Adjacent region queries may both fetch a read that spans their boundary.
 TelSeq assigns each alignment to the unique window containing its start
 coordinate, preventing duplicate contributions while allowing large
@@ -245,10 +251,10 @@ telseq -t 23 --profile-references -r 151 sample.bam \
 ```
 
 Each `[reference-profile]` stderr row reports the scheduler task and worker
-IDs, reference ID/name/length, genomic window start/end, records scanned and
-processed after filters, start and end offsets from the parallel scan epoch,
-and elapsed seconds. Rows are emitted after workers finish, so concurrent
-messages cannot interleave.
+IDs, reference ID/name/length, genomic window start/end, the index-derived
+scheduling estimate, records scanned and processed after filters, start and
+end offsets from the parallel scan epoch, and elapsed seconds. Rows are
+emitted after workers finish, so concurrent messages cannot interleave.
 
 ## Output
 

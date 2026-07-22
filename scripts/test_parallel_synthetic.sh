@@ -116,14 +116,14 @@ if ! TELSEQ_BENCH_OUT="$results_dir" \
 fi
 
 if ! grep -q \
-    "using 21 mapped-reference workers and 1 HTSlib compatibility scanner across 64 mapped-reference tasks from 64 references; window size 25000000 bp" \
+    "using 21 mapped-reference workers and 1 HTSlib compatibility scanner across 64 mapped-reference tasks from 64 references; window size 25000000 bp; task priority indexed record estimate" \
     "$results_dir/threads-22.stderr"; then
     echo "FAIL: -t 22 did not start the expected worker layout" >&2
     exit 11
 fi
 
 if ! grep -q \
-    "using 43 mapped-reference workers and 1 HTSlib compatibility scanner across 64 mapped-reference tasks from 64 references; window size 25000000 bp" \
+    "using 43 mapped-reference workers and 1 HTSlib compatibility scanner across 64 mapped-reference tasks from 64 references; window size 25000000 bp; task priority indexed record estimate" \
     "$results_dir/threads-44.stderr"; then
     echo "FAIL: -t 44 did not start the expected worker layout" >&2
     exit 12
@@ -173,11 +173,16 @@ if ! awk -F '\t' '
     }
     $1 == "[reference-profile]" {
         rows += 1
-        if (NF != 13 || $2 !~ /^[0-9]+$/ || $3 !~ /^[0-9]+$/ ||
+        if (NF != 14 || $2 !~ /^[0-9]+$/ || $3 !~ /^[0-9]+$/ ||
             $3 < 1 || $3 > 21 || $4 !~ /^[0-9]+$/ ||
             $6 !~ /^[0-9]+$/ || $7 !~ /^[0-9]+$/ ||
             $8 !~ /^[0-9]+$/ || $9 !~ /^[0-9]+$/ ||
-            $10 !~ /^[0-9]+$/ || $11 < 0 || $12 < $11 || $13 < 0) {
+            $10 !~ /^[0-9]+$/ || $11 !~ /^[0-9]+$/ ||
+            $12 < 0 || $13 < $12 || $14 < 0) {
+            invalid = 1
+        }
+        if ($2 == 0 &&
+            ($4 != 6 || $5 != "contig6" || $9 != 21 || $10 != 21)) {
             invalid = 1
         }
         seen_reference[$4] += 1
@@ -193,7 +198,7 @@ if ! awk -F '\t' '
         }
     }
 ' "$profile_stderr"; then
-    echo "FAIL: per-reference profile is incomplete or malformed" >&2
+    echo "FAIL: per-reference profile or indexed-record priority is invalid" >&2
     sed -n '/^\[reference-profile\]/p' "$profile_stderr" >&2
     exit 27
 fi
@@ -234,9 +239,9 @@ if ! awk -F '\t' '
         rows += 1
         if ($5 == "contig0") {
             contig_tasks += 1
-            if ($7 == 0 && $8 == 25000000 && $9 == 23) first = 1
-            if ($7 == 25000000 && $8 == 50000000 && $9 == 3) second = 1
-            if ($7 == 50000000 && $8 == 50001100 && $9 == 1) third = 1
+            if ($7 == 0 && $8 == 25000000 && $9 == 14 && $10 == 23) first = 1
+            if ($7 == 25000000 && $8 == 50000000 && $9 == 14 && $10 == 3) second = 1
+            if ($7 == 50000000 && $8 == 50001100 && $9 == 1 && $10 == 1) third = 1
         }
     }
     END {
@@ -316,6 +321,6 @@ echo "PASS: synthetic parallel test completed"
 echo "Expected legacy counts: Total=1130 Mapped=1120 Duplicates=3"
 echo "Fast tail access: 8 indexed records fetched; 0 full sequential scans"
 echo "No-tail fallback: 20 final-reference records fetched; stock output matched"
-echo "Reference profile: 64 timed tasks; standard output unchanged"
+echo "Reference profile: 64 timed tasks with index estimates; standard output unchanged"
 echo "Window ownership: boundary-spanning records counted exactly once"
 echo "Artifacts: $test_dir"

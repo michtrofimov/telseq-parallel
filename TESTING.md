@@ -250,6 +250,11 @@ dynamically consume indexed reference-window tasks. The default window size is
 25 million bases; use `--reference-window-size` to test another size or `0` to
 reproduce the whole-reference scheduler.
 
+The queue is ordered by an approximate record count derived from BAI
+per-reference statistics and window length, rather than by genomic length
+alone. This makes dense short references run early. The startup log reports
+whether indexed record estimates or the genomic-length fallback are active.
+
 The compatibility scanner uses the BAI to retrieve the no-coordinate tail
 directly. Its progress log reports how many indexed records it fetched and
 must report `full sequential scans: 0`. This retains no-coordinate alignments
@@ -259,8 +264,9 @@ BAM a second time.
 To inspect whole-reference scheduling, add `--profile-references` to a
 parallel run. Its tab-separated `[reference-profile]` rows are written only to
 stderr and include per-task worker assignment, reference and window metadata,
-read counts, start/end time offsets, and elapsed time. For the Docker benchmark
-wrapper, pass it after `--` with the other TelSeq arguments:
+the index-derived record estimate, read counts, start/end time offsets, and
+elapsed time. For the Docker benchmark wrapper, pass it after `--` with the
+other TelSeq arguments:
 
 ```bash
 scripts/compare_and_benchmark_docker.sh \
@@ -272,8 +278,9 @@ scripts/compare_and_benchmark_docker.sh \
 ```
 
 The synthetic compatibility test asserts that profiling emits one well-formed
-row per task and does not change stdout. Its boundary fixture expands one
-reference into three windows and checks the exact read count owned by each.
+row per task, prioritizes a deliberately dense short reference, and does not
+change stdout. Its boundary fixture expands one reference into three windows
+and checks the exact read count owned by each.
 The `master` image is a moving development tag published only after the
 container test gates pass; it is not a numbered release.
 

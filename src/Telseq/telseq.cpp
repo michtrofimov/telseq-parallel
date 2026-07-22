@@ -146,6 +146,7 @@ struct ReferenceTask
     int refLength;
     int begin;
     int end;
+    uint64_t estimatedRecords;
 };
 
 struct ReferenceProfile
@@ -223,6 +224,26 @@ typedef std::unique_ptr<bam_hdr_t, SamHeaderDeleter> SamHeaderPtr;
 typedef std::unique_ptr<hts_idx_t, HtsIndexDeleter> HtsIndexPtr;
 typedef std::unique_ptr<hts_itr_t, HtsIteratorDeleter> HtsIteratorPtr;
 typedef std::unique_ptr<bam1_t, BamRecordDeleter> BamRecordPtr;
+
+static uint64_t estimate_task_records(
+    const uint64_t referenceRecords,
+    const int referenceLength,
+    const int begin,
+    const int end)
+{
+    if (referenceRecords == 0 || referenceLength <= 0 || end <= begin) {
+        return 0;
+    }
+
+    // Avoid multiplying the complete record count by the task length: that
+    // product can overflow even though the proportional estimate cannot.
+    const uint64_t taskLength = static_cast<uint64_t>(end - begin);
+    const uint64_t length = static_cast<uint64_t>(referenceLength);
+    const uint64_t quotient = referenceRecords / length;
+    const uint64_t remainder = referenceRecords % length;
+    return quotient * taskLength +
+        (remainder * taskLength + length - 1) / length;
+}
 
 // This reducer is intentionally separate from add_results().  The latter is
 // part of the legacy -w path and its behaviour is kept unchanged for output
@@ -453,6 +474,58 @@ static bool scan_bam_parallel(
         return false;
     }
 
+    // BAI per-reference record totals provide a much better scheduling cost
+    // estimate than genomic length. In particular, short decoy references can
+    // contain millions of reads and otherwise become late stragglers.
+    std::vector<uint64_t> referenceRecords(references.size(), 0);
+    bool haveReferenceStatistics = true;
+    {
+        SamFilePtr statisticsReader(sam_open(bamPath.c_str(), "rb"));
+        if (!statisticsReader) {
+            std::cerr << "Error: HTSlib could not open BAM for task scheduling\n";
+            return false;
+        }
+
+        SamHeaderPtr statisticsHeader(sam_hdr_read(statisticsReader.get()));
+        if (!statisticsHeader) {
+            std::cerr << "Error: HTSlib could not read BAM header for task "
+                      << "scheduling\n";
+            return false;
+        }
+        if (statisticsHeader->n_targets !=
+            static_cast<int>(references.size())) {
+            std::cerr << "Error: BamTools and HTSlib report different "
+                      << "reference counts for " << bamPath << ".\n";
+            return false;
+        }
+
+        HtsIndexPtr statisticsIndex(
+            sam_index_load(statisticsReader.get(), bamPath.c_str()));
+        if (!statisticsIndex) {
+            std::cerr << "Error: HTSlib could not load a BAI or CSI index for "
+                      << bamPath << ".\n";
+            return false;
+        }
+
+        for (int refID = 0;
+             refID < static_cast<int>(references.size());
+             ++refID) {
+            uint64_t mapped = 0;
+            uint64_t unmapped = 0;
+            if (hts_idx_get_stat(
+                    statisticsIndex.get(), refID, &mapped, &unmapped) != 0) {
+                haveReferenceStatistics = false;
+                break;
+            }
+            referenceRecords[refID] = mapped + unmapped;
+        }
+    }
+
+    if (!haveReferenceStatistics) {
+        std::cerr << "Indexed per-reference record counts are unavailable; "
+                  << "using genomic-length task priority\n";
+    }
+
     std::vector<ReferenceTask> tasks;
     tasks.reserve(references.size());
     for (int refID = 0;
@@ -466,6 +539,10 @@ static bool scan_bam_parallel(
             task.refLength = refLength;
             task.begin = 0;
             task.end = refLength;
+            task.estimatedRecords = haveReferenceStatistics
+                ? estimate_task_records(
+                    referenceRecords[refID], refLength, task.begin, task.end)
+                : static_cast<uint64_t>(refLength);
             tasks.push_back(task);
             continue;
         }
@@ -479,18 +556,26 @@ static bool scan_bam_parallel(
             task.refLength = refLength;
             task.begin = begin;
             task.end = begin + taskLength;
+            task.estimatedRecords = haveReferenceStatistics
+                ? estimate_task_records(
+                    referenceRecords[refID], refLength, task.begin, task.end)
+                : static_cast<uint64_t>(taskLength);
             tasks.push_back(task);
             begin = task.end;
         }
     }
 
-    // Long windows start first. Equal-sized windows retain reference and
-    // coordinate order so exome search hints never move backwards within a
-    // reference. Workers fetch another window as soon as they finish.
+    // High estimated-record windows start first. Estimates are proportional
+    // within a reference, so ties retain reference and coordinate order and
+    // exome search hints never move backwards. Workers fetch another window
+    // as soon as they finish.
     std::sort(
         tasks.begin(),
         tasks.end(),
         [](const ReferenceTask& left, const ReferenceTask& right) {
+            if (left.estimatedRecords != right.estimatedRecords) {
+                return left.estimatedRecords > right.estimatedRecords;
+            }
             const int leftLength = left.end - left.begin;
             const int rightLength = right.end - right.begin;
             if (leftLength != rightLength) {
@@ -533,7 +618,10 @@ static bool scan_bam_parallel(
               << " mapped-reference workers and 1 HTSlib compatibility scanner "
               << "across " << tasks.size() << " mapped-reference tasks from "
               << references.size() << " references; window size "
-              << opt::referenceWindowSize << " bp\n";
+              << opt::referenceWindowSize << " bp; task priority "
+              << (haveReferenceStatistics ? "indexed record estimate"
+                                           : "genomic length")
+              << "\n";
 
     std::thread tailWorker([&]() {
         try {
@@ -831,7 +919,7 @@ static bool scan_bam_parallel(
     if (opt::profileReferences) {
         std::cerr << "[reference-profile]\ttask\tworker\tref_id\treference"
                   << "\treference_length\twindow_start\twindow_end"
-                  << "\treads_scanned\treads_processed"
+                  << "\testimated_records\treads_scanned\treads_processed"
                   << "\tstart_seconds\tend_seconds\telapsed_seconds\n";
         for (std::size_t taskIndex = 0;
              taskIndex < referenceProfiles.size();
@@ -850,6 +938,7 @@ static bool scan_bam_parallel(
                 << task.refLength << "\t"
                 << task.begin << "\t"
                 << task.end << "\t"
+                << task.estimatedRecords << "\t"
                 << profile.readsScanned << "\t"
                 << profile.readsProcessed << "\t"
                 << std::fixed << std::setprecision(6)

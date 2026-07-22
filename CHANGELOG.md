@@ -20,6 +20,9 @@
   direct comparison with the previous whole-reference scheduler;
 - synthetic boundary coverage verifies byte-identical output for reads that
   end at, span, start at, or start immediately after a window boundary.
+- mapped-reference tasks are prioritized by BAI record-count estimates so
+  dense short references start early instead of becoming late stragglers;
+- reference profiles include the record-count estimate used by the scheduler.
 
 ## 0.2.0 - 2026-07-22
 

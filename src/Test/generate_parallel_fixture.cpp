@@ -76,6 +76,9 @@ int main(int argc, char** argv)
     const int defaultWindowSize = 25000000;
     const int boundaryReferenceLength =
         2 * defaultWindowSize + readLength + 1000;
+    const int denseShortReferenceID = 6;
+    const int denseShortReferenceLength =
+        1000 + (readsPerReference + 1) * recordSpacing;
     BamTools::RefVector references;
     std::ostringstream header;
     header << "@HD\tVN:1.0\tSO:coordinate\n";
@@ -85,7 +88,10 @@ int main(int argc, char** argv)
         const int currentReferenceLength =
             includeWindowBoundaryRecords && refID == 0
                 ? boundaryReferenceLength
-                : referenceLength;
+                : (!includeWindowBoundaryRecords &&
+                   refID == denseShortReferenceID
+                    ? denseShortReferenceLength
+                    : referenceLength);
         references.push_back(
             BamTools::RefData(name, currentReferenceLength));
         header << "@SQ\tSN:" << name
@@ -148,7 +154,9 @@ int main(int argc, char** argv)
         // This record is unmapped by flag, but still has a coordinate. It must
         // be returned by the indexed reference scan, not by the no-coordinate
         // compatibility branch.
-        if (refID == 0) {
+        const int positionedUnmappedReferenceID =
+            includeWindowBoundaryRecords ? 0 : denseShortReferenceID;
+        if (refID == positionedUnmappedReferenceID) {
             BamTools::BamAlignment positionedUnmapped = make_alignment(
                 "positioned-unmapped",
                 refID,
