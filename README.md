@@ -369,40 +369,29 @@ scripts/compare_and_benchmark_docker.sh \
 
 ## Performance and validation
 
-Version 0.3.0 is published without a new real-WGS benchmark. The measurements
-below are retained as historical version 0.2.0 results and do not measure the
-new reference-window scheduler or strict primary-chromosome mode.
+Version 0.3.0 was measured on one real WGS BAM in default compatibility mode
+at 4, 8, 12, 23, 46, and 80 requested threads. Wall time fell from 21.61
+minutes at `-t 4` to 1.47 minutes at `-t 80`, a 14.69× speedup and a 93.19%
+reduction within the measured series.
 
-### Observed real-WGS scaling
+![TelSeq Parallel v0.3 real WGS wall time by requested thread count](benchmarks/real-wgs-2026-07-22-v0.3-windows/wall-time-vs-threads.svg)
 
-Version 0.2.0 was compared across 1, 4, 8, 12, 23, 46, and 80 requested
-threads on a real WGS BAM. Wall time fell from 55.14 minutes at `-t 1` to 5.60
-minutes at `-t 80`, a 9.85× speedup and an 89.85% reduction.
+Unlike the version 0.2 whole-reference scheduler, version 0.3 continued to
+scale beyond 23 threads. At `-t 80`, the reference-window scheduler completed
+in 88.28 seconds versus 335.88 seconds for version 0.2, a 73.72% reduction.
+All v0.3 thread-count runs produced the same result SHA-256, which also matches
+the result hash from every parallel version 0.2 run.
 
-![TelSeq Parallel v0.2 real WGS wall time by requested thread count](benchmarks/real-wgs-2026-07-22-htslib/wall-time-vs-threads.svg)
+See the [complete version 0.3 benchmark, raw timings, comparison, and
+limitations](benchmarks/real-wgs-2026-07-22-v0.3-windows/README.md). The
+[version 0.2 benchmark](benchmarks/real-wgs-2026-07-22-htslib/README.md) and
+[version 0.1 benchmark](benchmarks/real-wgs-2026-07-21/README.md) are retained
+for historical comparison.
 
-The version 0.2.0 practical knee was `-t 23`, which finished in 5.71 minutes. Increasing the
-request from 23 to 80 threads saved only 6.74 seconds, or 1.97%. At `-t 23`,
-22 mapped-reference workers can already process most long human chromosomes
-concurrently. Because reference tasks are not divided further, the slowest
-remaining chromosome, storage throughput, or decompression capacity can bound
-the run even when more workers are available.
-
-See the [complete version 0.2 benchmark, raw timings, and limitations](benchmarks/real-wgs-2026-07-22-htslib/README.md).
-The [version 0.1 benchmark](benchmarks/real-wgs-2026-07-21/README.md) is retained
-for comparison; its full-file compatibility scanner limited speedup to 1.43×.
-
-In version 0.2 the HTSlib compatibility worker requests only the indexed
-no-coordinate records. When that tail is present, the final tail record also
-supplies stock TelSeq's legacy EOF contribution. If no no-coordinate tail is
-present, the worker scans only the highest populated reference needed to
-recover the final physical record. It never performs the old full sequential
-BAM pass.
-
-More threads still do not guarantee better performance. For this tested BAM,
-`-t 23` is the best practical high-throughput choice and `-t 12` is a useful
-lower-resource choice. Rebenchmark on representative data before applying
-these settings to another storage system or BAM layout.
+This benchmark used default whole-BAM compatibility mode; it did not enable
+the optional `--primary-chromosomes-only` filter. More threads still do not
+guarantee better performance on other systems. Rebenchmark on representative
+data before choosing a production thread count.
 
 See [TESTING.md](TESTING.md) for correctness tests, comparison against stock
 TelSeq output, benchmark commands, forwarded analysis parameters, and guidance

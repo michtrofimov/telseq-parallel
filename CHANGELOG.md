@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+### Documentation
+
+- publish the real-WGS version 0.3 reference-window scaling benchmark, where
+  wall time reached 88.28 seconds at 80 requested threads and all measured
+  thread counts produced the same result hash.
+
 ## 0.3.0 - 2026-07-22
 
 ### Added
