@@ -143,7 +143,7 @@ int main(int argc, char** argv)
             BamTools::BamAlignment positionedUnmapped = make_alignment(
                 "positioned-unmapped",
                 refID,
-                5000,
+                100 + readsPerReference * recordSpacing,
                 ordinary,
                 false,
                 false);
