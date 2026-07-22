@@ -16,9 +16,6 @@
 #include <thread>
 #include <unistd.h>
 
-#include <htslib/hts.h>
-#include <htslib/sam.h>
-
 #include "telseq.h"
 #include "Timer.h"
 #include "math.h"
@@ -26,6 +23,11 @@
 #include "api/BamWriter.h"
 #include "Util.h"
 #include "prettyprint.h"
+
+// BamTools and HTSlib both define BAM_CIGAR_* names. Include BamTools first
+// so its constants are parsed before HTSlib exposes the matching macros.
+#include <htslib/hts.h>
+#include <htslib/sam.h>
 
 //
 // Getopt
