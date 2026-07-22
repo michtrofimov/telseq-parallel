@@ -19,7 +19,8 @@
 - when a BAM has no no-coordinate tail, only its highest populated reference
   is inspected to recover stock TelSeq's legacy final-record contribution;
 - parallel mode now requires a standard BAI readable by both BamTools and
-  HTSlib;
+  HTSlib, including no-coordinate-tail metadata normally written by
+  `samtools index`;
 - the Linux AMD64 container includes the HTSlib runtime.
 
 ### Compatibility

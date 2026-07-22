@@ -104,6 +104,18 @@ sample.bam
 sample.bai
 ```
 
+Create or refresh the index with HTSlib/samtools so it includes the metadata
+used for direct no-coordinate-tail access:
+
+```bash
+samtools index sample.bam
+```
+
+Some older BAI writers produce an index that is adequate for reference-region
+queries but omits this optional tail metadata. If parallel mode reports that
+the index does not support direct no-coordinate access, rebuild the BAI with
+`samtools index`; the BAM itself does not need to be rewritten.
+
 TelSeq normally reports results by read group. Read-group IDs should be
 declared in the BAM header and reads should carry matching `RG` tags. Use `-u`
 to ignore read groups and treat all reads in each BAM as one group.
