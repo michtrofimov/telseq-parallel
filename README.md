@@ -370,9 +370,9 @@ scripts/compare_and_benchmark_docker.sh \
 ## Performance and validation
 
 Version 0.3.0 was measured on one real WGS BAM in default compatibility mode
-at 4, 8, 12, 23, 46, and 80 requested threads. Wall time fell from 21.61
-minutes at `-t 4` to 1.47 minutes at `-t 80`, a 14.69× speedup and a 93.19%
-reduction within the measured series.
+at 4, 8, 12, 23, 46, and 80 requested threads. Including the 55.14-minute
+`-t 1` baseline from the unchanged sequential path, wall time reached 1.47
+minutes at `-t 80`: a 37.48× speedup and a 97.33% reduction.
 
 ![TelSeq Parallel v0.3 real WGS wall time by requested thread count](benchmarks/real-wgs-2026-07-22-v0.3-windows/wall-time-vs-threads.svg)
 
