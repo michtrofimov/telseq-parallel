@@ -199,6 +199,7 @@ telseq -t 22 -r 151 -o sample.telseq.tsv sample.bam
 | Option | Default | Meaning |
 | --- | ---: | --- |
 | `-t INT`, `--threads=INT` | `1` | Threads requested for one BAM. Valid range: 1–1024. Values greater than 1 require a coordinate-sorted, indexed BAM. |
+| `--profile-references` | off | With `-t > 1`, write one tab-separated timing record per mapped-reference task to stderr. |
 | `-r INT` | `100` | Read length in bases. Controls the supported motif-count range and therefore the number of `TEL` columns. |
 | `-k INT` | `7` | Minimum number of `TTAGGG` or `CCCTAA` repeats for a read to contribute to the telomeric-read numerator. |
 | `-f FILE`, `--bamlist=FILE` | — | Read BAM paths from a one-column file. Positional BAM arguments are ignored when this is used. |
@@ -216,6 +217,22 @@ telseq -t 22 -r 151 -o sample.telseq.tsv sample.bam
 Use the same `-r`, `-k`, `-z`, `-e`, `-m`, `-u`, and `-w` settings whenever
 outputs are compared. Thread count should be the only changing parameter in a
 parallel compatibility comparison.
+
+### Profile mapped-reference tasks
+
+To diagnose scaling limits without changing result stdout, enable the optional
+per-reference profile:
+
+```bash
+telseq -t 23 --profile-references -r 151 sample.bam \
+    > sample.telseq.tsv \
+    2> sample.reference-profile.log
+```
+
+Each `[reference-profile]` stderr row reports the scheduler task and worker
+IDs, reference ID/name/length, records scanned and processed after filters,
+start and end offsets from the parallel scan epoch, and elapsed seconds. Rows
+are emitted after workers finish, so concurrent messages cannot interleave.
 
 ## Output
 

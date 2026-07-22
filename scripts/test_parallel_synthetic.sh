@@ -145,6 +145,58 @@ if ! grep -Fqx \
     exit 14
 fi
 
+if grep -q '^\[reference-profile\]' \
+    "$results_dir/threads-22.stderr"; then
+    echo "FAIL: reference profiling was enabled by default" >&2
+    exit 24
+fi
+
+profile_stdout="$test_dir/profile.stdout"
+profile_stderr="$test_dir/profile.stderr"
+if ! "$new_telseq" --profile-references -t 22 "$bam" \
+    >"$profile_stdout" \
+    2>"$profile_stderr"; then
+    echo "FAIL[25]: profiled parallel execution failed" >&2
+    sed -n '1,200p' "$profile_stderr" >&2
+    exit 25
+fi
+
+if ! cmp -s "$results_dir/threads-22.stdout" "$profile_stdout"; then
+    echo "FAIL: reference profiling changed standard output" >&2
+    exit 26
+fi
+
+if ! awk -F '\t' '
+    $1 == "[reference-profile]" && $2 == "task" {
+        headers += 1
+        next
+    }
+    $1 == "[reference-profile]" {
+        rows += 1
+        if (NF != 11 || $2 !~ /^[0-9]+$/ || $3 !~ /^[0-9]+$/ ||
+            $3 < 1 || $3 > 21 || $4 !~ /^[0-9]+$/ ||
+            $6 !~ /^[0-9]+$/ || $7 !~ /^[0-9]+$/ ||
+            $8 !~ /^[0-9]+$/ || $9 < 0 || $10 < $9 || $11 < 0) {
+            invalid = 1
+        }
+        seen_reference[$4] += 1
+    }
+    END {
+        if (headers != 1 || rows != 64 || invalid) {
+            exit 1
+        }
+        for (reference in seen_reference) {
+            if (seen_reference[reference] != 1) {
+                exit 1
+            }
+        }
+    }
+' "$profile_stderr"; then
+    echo "FAIL: per-reference profile is incomplete or malformed" >&2
+    sed -n '/^\[reference-profile\]/p' "$profile_stderr" >&2
+    exit 27
+fi
+
 observed_counts=$(awk -F '\t' '$1 == "rg1" {
     print $4 "\t" $5 "\t" $6
 }' "$results_dir/stock.stdout")
@@ -201,4 +253,5 @@ echo "PASS: synthetic parallel test completed"
 echo "Expected legacy counts: Total=1130 Mapped=1120 Duplicates=3"
 echo "Fast tail access: 8 indexed records fetched; 0 full sequential scans"
 echo "No-tail fallback: 20 final-reference records fetched; stock output matched"
+echo "Reference profile: 64 timed tasks; standard output unchanged"
 echo "Artifacts: $test_dir"

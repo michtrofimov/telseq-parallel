@@ -252,6 +252,24 @@ must report `full sequential scans: 0`. This retains no-coordinate alignments
 and stock TelSeq's legacy final-record contribution without reading the whole
 BAM a second time.
 
+To inspect whole-reference scheduling, add `--profile-references` to a
+parallel run. Its tab-separated `[reference-profile]` rows are written only to
+stderr and include per-task worker assignment, reference metadata, read
+counts, start/end offsets, and elapsed time. For the Docker benchmark wrapper,
+pass it after `--` with the other TelSeq arguments:
+
+```bash
+scripts/compare_and_benchmark_docker.sh \
+    --reference-output /path/to/stock-result.tsv \
+    telseq-parallel:profile \
+    /path/to/sample.bam \
+    12 23 46 \
+    -- --profile-references -r 151
+```
+
+The synthetic compatibility test asserts that profiling emits exactly one
+well-formed row for each of its 64 references and does not change stdout.
+
 ## Container validation
 
 The release workflow builds the Linux AMD64 container from the current source.

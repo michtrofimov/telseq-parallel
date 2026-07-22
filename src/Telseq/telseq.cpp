@@ -10,7 +10,9 @@
 #include <set>
 #include <map>
 #include <atomic>
+#include <chrono>
 #include <exception>
+#include <iomanip>
 #include <memory>
 #include <mutex>
 #include <thread>
@@ -61,6 +63,7 @@ static const char *TELSEQ_USAGE_MESSAGE =
 "   -u                       ignore read groups. Treat all reads in BAM as if they were from a same read group.\n"
 "   -t, --threads=INT        number of threads for one coordinate-sorted, indexed BAM. default = 1.\n"
 "                            Values greater than 1 reserve one compatibility scanner; remaining workers use the index.\n"
+"   --profile-references     emit per-reference worker timing records to standard error. requires -t > 1.\n"
 "   -k                       threshold of the amount of TTAGGG/CCCTAA repeats in read for a read to be considered telomeric. default = 7.\n"
 "\nTesting functions\n------------\n"
 "   -r                       read length. default = 100\n"
@@ -83,6 +86,7 @@ namespace opt
     static bool ignorerg = false;
     static bool onebam = false; // whether to consider all bams as one bam
     static unsigned int threads = 1;
+    static bool profileReferences = false;
     static int tel_k= ScanParameters::TEL_MOTIF_CUTOFF;
     static std::string unknown = "UNKNOWN";
     static std::string PATTERN;
@@ -92,13 +96,14 @@ namespace opt
 
 static const char* shortopts = "f:o:k:z:e:r:p:t:Hhvmuw";
 
-enum { OPT_HELP = 1, OPT_VERSION };
+enum { OPT_HELP = 1, OPT_VERSION, OPT_PROFILE_REFERENCES };
 
 static const struct option longopts[] = {
 	{ "bamlist",		optional_argument, NULL, 'f' },
     { "output-dir",		optional_argument, NULL, 'o' },
     { "exomebed",		optional_argument, NULL, 'e' },
     { "threads",            required_argument, NULL, 't' },
+    { "profile-references", no_argument,       NULL, OPT_PROFILE_REFERENCES },
     { "help",               no_argument,       NULL, OPT_HELP },
     { "version",            no_argument,       NULL, OPT_VERSION },
     { NULL, 0, NULL, 0 }
@@ -131,6 +136,24 @@ struct ReferenceTask
     int refID;
     int refLength;
 };
+
+struct ReferenceProfile
+{
+    ReferenceProfile()
+        : workerID(0), readsScanned(0), readsProcessed(0),
+          startSeconds(0.0), endSeconds(0.0), completed(false)
+    {
+    }
+
+    std::size_t workerID;
+    uint64_t readsScanned;
+    uint64_t readsProcessed;
+    double startSeconds;
+    double endSeconds;
+    bool completed;
+};
+
+typedef std::chrono::steady_clock ReferenceProfileClock;
 
 static std::mutex parallelLogMutex;
 
@@ -449,6 +472,12 @@ static bool scan_bam_parallel(
     std::vector<uint64_t> workerScanned(mappedWorkerCount, 0);
     std::vector<uint64_t> workerProcessed(mappedWorkerCount, 0);
     std::vector<std::string> workerErrors(mappedWorkerCount);
+    std::vector<ReferenceProfile> referenceProfiles(
+        opt::profileReferences ? tasks.size() : 0);
+    ReferenceProfileClock::time_point referenceProfileEpoch;
+    if (opt::profileReferences) {
+        referenceProfileEpoch = ReferenceProfileClock::now();
+    }
     ResultMap tailResults = emptyResultMap;
     uint64_t tailScanned = 0;
     uint64_t tailProcessed = 0;
@@ -667,6 +696,19 @@ static bool scan_bam_parallel(
                     }
 
                     const ReferenceTask& task = tasks[taskIndex];
+                    ReferenceProfile* profile = NULL;
+                    uint64_t scannedBeforeTask = 0;
+                    uint64_t processedBeforeTask = 0;
+                    if (opt::profileReferences) {
+                        profile = &referenceProfiles[taskIndex];
+                        profile->workerID = workerID + 1;
+                        scannedBeforeTask = workerScanned[workerID];
+                        processedBeforeTask = workerProcessed[workerID];
+                        profile->startSeconds =
+                            std::chrono::duration<double>(
+                                ReferenceProfileClock::now() -
+                                referenceProfileEpoch).count();
+                    }
                     const bool positioned = reader.SetRegion(
                         task.refID,
                         0,
@@ -692,6 +734,18 @@ static bool scan_bam_parallel(
                             workerResults[workerID],
                             lastfound,
                             workerProcessed[workerID]);
+                    }
+
+                    if (profile != NULL) {
+                        profile->endSeconds =
+                            std::chrono::duration<double>(
+                                ReferenceProfileClock::now() -
+                                referenceProfileEpoch).count();
+                        profile->readsScanned =
+                            workerScanned[workerID] - scannedBeforeTask;
+                        profile->readsProcessed =
+                            workerProcessed[workerID] - processedBeforeTask;
+                        profile->completed = true;
                     }
                 }
                 reader.Close();
@@ -722,6 +776,35 @@ static bool scan_bam_parallel(
             }
         }
         return false;
+    }
+
+    if (opt::profileReferences) {
+        std::cerr << "[reference-profile]\ttask\tworker\tref_id\treference"
+                  << "\treference_length\treads_scanned\treads_processed"
+                  << "\tstart_seconds\tend_seconds\telapsed_seconds\n";
+        for (std::size_t taskIndex = 0;
+             taskIndex < referenceProfiles.size();
+             ++taskIndex) {
+            const ReferenceProfile& profile = referenceProfiles[taskIndex];
+            if (!profile.completed) {
+                continue;
+            }
+            const ReferenceTask& task = tasks[taskIndex];
+            std::ostringstream row;
+            row << "[reference-profile]\t"
+                << taskIndex << "\t"
+                << profile.workerID << "\t"
+                << task.refID << "\t"
+                << references[task.refID].RefName << "\t"
+                << task.refLength << "\t"
+                << profile.readsScanned << "\t"
+                << profile.readsProcessed << "\t"
+                << std::fixed << std::setprecision(6)
+                << profile.startSeconds << "\t"
+                << profile.endSeconds << "\t"
+                << profile.endSeconds - profile.startSeconds << "\n";
+            std::cerr << row.str();
+        }
     }
 
     combinedResults = emptyResultMap;
@@ -1281,6 +1364,9 @@ void parseScanOptions(int argc, char** argv)
                     opt::threads = static_cast<unsigned int>(requestedThreads);
                 }
                 break;
+            case OPT_PROFILE_REFERENCES:
+                opt::profileReferences = true;
+                break;
             case 'p':
 
 				break;
@@ -1304,6 +1390,11 @@ void parseScanOptions(int argc, char** argv)
                 std::cout << TELSEQ_VERSION_MESSAGE;
                 exit(EXIT_SUCCESS);
         }
+    }
+
+    if(opt::profileReferences && opt::threads == 1){
+        std::cerr << "--profile-references requires -t greater than 1\n";
+        exit(EXIT_FAILURE);
     }
 
     update_pattern();

@@ -8,6 +8,9 @@
   comparing every thread count byte-for-byte against saved stock output.
 - Docker benchmarks preserve the host BAM path inside the container so
   inherited path text in stdout does not cause a false comparison failure.
+- `--profile-references` emits per-reference scheduler assignment, read counts,
+  and timing offsets to stderr for diagnosing parallel scaling limits without
+  changing result stdout.
 
 ## 0.2.0 - 2026-07-22
 
