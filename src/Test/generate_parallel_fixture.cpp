@@ -5,8 +5,12 @@
 #include <string>
 
 #include "api/BamAlignment.h"
-#include "api/BamReader.h"
 #include "api/BamWriter.h"
+
+// Create the BAI with the same implementation used by the compatibility
+// scanner. BamTools writes a readable BAI, but omits the optional metadata
+// needed by HTS_IDX_NOCOOR to seek directly to the no-coordinate tail.
+#include <htslib/sam.h>
 
 static BamTools::BamAlignment make_alignment(
     const std::string& name,
@@ -169,18 +173,10 @@ int main(int argc, char** argv)
 
     writer.Close();
 
-    BamTools::BamReader reader;
-    if (!reader.Open(bamPath)) {
-        std::cerr << "Could not reopen fixture: "
-                  << reader.GetErrorString() << "\n";
+    if (sam_index_build(bamPath.c_str(), 0) != 0) {
+        std::cerr << "HTSlib could not index fixture: " << bamPath << "\n";
         return 1;
     }
-    if (!reader.CreateIndex(BamTools::BamIndex::STANDARD)) {
-        std::cerr << "Could not index fixture: "
-                  << reader.GetErrorString() << "\n";
-        return 1;
-    }
-    reader.Close();
 
     std::cerr << "Created " << bamPath << " with "
               << referenceCount << " references, "
