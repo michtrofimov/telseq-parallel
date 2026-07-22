@@ -285,6 +285,19 @@ Build a local image from the current checkout with:
 docker build -t telseq-parallel:local .
 ```
 
+To compare the released container against existing stock TelSeq output across
+several thread counts, use the Docker benchmark wrapper documented in
+[TESTING.md](TESTING.md#benchmark-the-docker-image):
+
+```bash
+scripts/compare_and_benchmark_docker.sh \
+    --reference-output stock-result.tsv \
+    ghcr.io/michtrofimov/telseq-parallel:0.2.0 \
+    sample.bam \
+    4 8 22 44 \
+    -- -r 151
+```
+
 ## Performance and validation
 
 ### Observed real-WGS scaling

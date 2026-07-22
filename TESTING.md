@@ -145,6 +145,32 @@ arguments. Do not pass the following options after `--`:
 - `-f` / `--bamlist`, because the wrapper controls the input BAM; or
 - `-o` / `--output-dir`, because the wrapper captures stdout.
 
+### Benchmark the Docker image
+
+Use `compare_and_benchmark_docker.sh` to test a released image against saved
+stock TelSeq output without installing the new executable on the host:
+
+```bash
+scripts/compare_and_benchmark_docker.sh \
+    --reference-output /path/to/stock-result.tsv \
+    ghcr.io/michtrofimov/telseq-parallel:0.2.0 \
+    /path/to/sample.bam \
+    4 8 22 44 \
+    -- -r 151 -k 7
+```
+
+The BAM directory is mounted read-only at `/data` inside each container. The
+BAI must be next to the BAM. Analysis parameters after `--` are forwarded to
+TelSeq exactly as in the native benchmark. If an analysis option needs another
+input file, such as `-e`, place that file in the BAM directory and pass its
+container path, for example `-- -e /data/targets.bed`.
+
+The image targets Linux AMD64, so the wrapper passes
+`--platform linux/amd64` by default. Set `TELSEQ_DOCKER_PLATFORM` to an empty
+value to let the container runtime choose its native platform. The summary's
+`real_seconds` measures end-to-end container wall time; its user and system
+columns describe the Docker client and are not container CPU measurements.
+
 ### Benchmark configuration
 
 The following environment variables alter wrapper behavior:
@@ -154,6 +180,8 @@ The following environment variables alter wrapper behavior:
 | `TELSEQ_BENCH_OUT` | timestamped directory | Select the artifact directory. |
 | `TELSEQ_STOP_ON_MISMATCH` | `1` | Stop at the first failed run or output mismatch. Set to `0` to finish the grid. |
 | `TELSEQ_RUN_BAM_COUNT` | `0` | Run the additional `samtools view -c` full BAM scan when set to `1`. |
+| `TELSEQ_DOCKER_BIN` | `docker` | Container runtime used by the Docker benchmark wrapper. |
+| `TELSEQ_DOCKER_PLATFORM` | `linux/amd64` | Platform passed to `docker run`; set to an empty value to omit `--platform`. |
 
 For example:
 

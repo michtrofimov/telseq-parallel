@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- `compare_and_benchmark_docker.sh` for timing released container images and
+  comparing every thread count byte-for-byte against saved stock output.
+
 ## 0.2.0 - 2026-07-22
 
 ### Added
