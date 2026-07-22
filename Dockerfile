@@ -13,6 +13,7 @@ RUN apt-get update && \
         build-essential \
         libbamtools-dev \
         libhts-dev \
+        time \
         zlib1g-dev && \
     rm -rf /var/lib/apt/lists/*
 

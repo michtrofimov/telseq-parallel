@@ -46,6 +46,8 @@ if ! TELSEQ_BENCH_OUT="$results_dir" \
 
     if [ "$(run_status stock)" != "0" ]; then
         echo "FAIL[20]: stock TelSeq execution failed" >&2
+        echo "Captured stderr:" >&2
+        sed -n '1,200p' "$results_dir/stock.stderr" >&2
         exit 20
     fi
 
@@ -54,6 +56,8 @@ if ! TELSEQ_BENCH_OUT="$results_dir" \
         label="threads-$thread_count"
         if [ "$(run_status "$label")" != "0" ]; then
             echo "FAIL[$diagnostic_code]: $label execution failed" >&2
+            echo "Captured stderr:" >&2
+            sed -n '1,200p' "$results_dir/$label.stderr" >&2
             exit "$diagnostic_code"
         fi
         diagnostic_code=$((diagnostic_code + 1))
