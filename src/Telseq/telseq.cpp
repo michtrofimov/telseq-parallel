@@ -478,7 +478,7 @@ static bool scan_bam_parallel(
     // estimate than genomic length. In particular, short decoy references can
     // contain millions of reads and otherwise become late stragglers.
     std::vector<uint64_t> referenceRecords(references.size(), 0);
-    bool haveReferenceStatistics = true;
+    bool haveReferenceStatistics = false;
     {
         SamFilePtr statisticsReader(sam_open(bamPath.c_str(), "rb"));
         if (!statisticsReader) {
@@ -512,12 +512,13 @@ static bool scan_bam_parallel(
              ++refID) {
             uint64_t mapped = 0;
             uint64_t unmapped = 0;
+            // BAI may omit the metadata bin for an empty reference. The
+            // vector's zero initialization is the correct estimate then.
             if (hts_idx_get_stat(
-                    statisticsIndex.get(), refID, &mapped, &unmapped) != 0) {
-                haveReferenceStatistics = false;
-                break;
+                    statisticsIndex.get(), refID, &mapped, &unmapped) == 0) {
+                referenceRecords[refID] = mapped + unmapped;
+                haveReferenceStatistics = true;
             }
-            referenceRecords[refID] = mapped + unmapped;
         }
     }
 
