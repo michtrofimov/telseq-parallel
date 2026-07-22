@@ -1,5 +1,5 @@
 .git
 .github
-bin/mac
+bin
 telseq-benchmark-*
 src/Test/test.*.bam

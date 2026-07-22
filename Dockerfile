@@ -30,7 +30,7 @@ RUN ./autogen.sh && \
 RUN make -j2
 
 RUN ../scripts/test_parallel_synthetic.sh \
-        ../bin/ubuntu/telseq \
+        ./Telseq/telseq \
         ./Telseq/telseq \
         ./Test/generate_parallel_fixture
 

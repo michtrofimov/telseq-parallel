@@ -225,9 +225,12 @@ BAM a second time.
 ## Container validation
 
 The release workflow builds the Linux AMD64 container from the current source.
-As part of the Docker build it runs the full stock-compatibility fixture,
-asserts indexed no-coordinate access, and runs the synthetic thread-scaling
-regression. The image cannot be published unless all of these checks pass.
+As part of the Docker build it uses the unchanged `-t 1` path as the serial
+reference, runs the complete compatibility fixture, asserts indexed
+no-coordinate access, and runs the synthetic thread-scaling regression. The
+image cannot be published unless all of these checks pass. The standalone
+compatibility command above should additionally be run with an actual stock
+TelSeq executable on a compatible host.
 
 This container check complements rather than replaces comparison with an
 unmodified stock TelSeq binary. The full synthetic script and at least one
