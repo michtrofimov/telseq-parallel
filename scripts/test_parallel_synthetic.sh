@@ -44,6 +44,42 @@ if ! TELSEQ_BENCH_OUT="$results_dir" \
             "$summary"
     }
 
+    diagnose_parallel_stderr() {
+        stderr_file=$1
+
+        if grep -Fq "HTSlib index does not support direct no-coordinate access" \
+            "$stderr_file"; then
+            echo 40
+        elif grep -Fq "HTSlib could not load a BAI or CSI index" \
+            "$stderr_file"; then
+            echo 41
+        elif grep -Fq "HTSlib failed while reading no-coordinate BAM records" \
+            "$stderr_file"; then
+            echo 42
+        elif grep -Fq "HTSlib could not open BAM" "$stderr_file" ||
+             grep -Fq "HTSlib could not read BAM header" "$stderr_file" ||
+             grep -Fq "HTSlib could not allocate BAM records" "$stderr_file"; then
+            echo 43
+        elif grep -Fq "could not copy RG tag from HTSlib alignment" \
+            "$stderr_file" ||
+             grep -Fq "HTSlib found a non-string RG tag" "$stderr_file"; then
+            echo 44
+        elif grep -Eq "Error in worker [0-9]+: could not open BAM" \
+            "$stderr_file"; then
+            echo 45
+        elif grep -Eq "Error in worker [0-9]+: could not locate BAM index" \
+            "$stderr_file"; then
+            echo 46
+        elif grep -Eq "Error in worker [0-9]+: could not seek to reference" \
+            "$stderr_file"; then
+            echo 47
+        elif grep -Fq "Command terminated by signal" "$stderr_file"; then
+            echo 48
+        else
+            echo 49
+        fi
+    }
+
     if [ "$(run_status stock)" != "0" ]; then
         echo "FAIL[20]: stock TelSeq execution failed" >&2
         echo "Captured stderr:" >&2
@@ -51,16 +87,16 @@ if ! TELSEQ_BENCH_OUT="$results_dir" \
         exit 20
     fi
 
-    diagnostic_code=21
     for thread_count in 1 2 22 44; do
         label="threads-$thread_count"
         if [ "$(run_status "$label")" != "0" ]; then
-            echo "FAIL[$diagnostic_code]: $label execution failed" >&2
+            parallel_diagnostic=$(diagnose_parallel_stderr \
+                "$results_dir/$label.stderr")
+            echo "FAIL[$parallel_diagnostic]: $label execution failed" >&2
             echo "Captured stderr:" >&2
             sed -n '1,200p' "$results_dir/$label.stderr" >&2
-            exit "$diagnostic_code"
+            exit "$parallel_diagnostic"
         fi
-        diagnostic_code=$((diagnostic_code + 1))
     done
 
     diagnostic_code=31
