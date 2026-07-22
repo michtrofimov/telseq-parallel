@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.3.0 - 2026-07-22
+
 ### Added
 
 - `compare_and_benchmark_docker.sh` for timing released container images and
