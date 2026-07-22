@@ -78,8 +78,44 @@ if [ "$observed_counts" != "$(printf '1130\t1120\t3')" ]; then
     exit 1
 fi
 
+# Exercise the compatibility fallback used when a coordinate-sorted BAM has
+# no no-coordinate tail. The highest populated reference contains 20 records,
+# so the scanner must fetch only those records to retain the stock EOF
+# contribution; it must not fall back to a whole-file pass.
+no_tail_bam="$test_dir/no-tail-fixture.bam"
+"$fixture_generator" "$no_tail_bam" 20 100 0
+
+"$stock_telseq" "$no_tail_bam" \
+    >"$test_dir/no-tail-stock.stdout" \
+    2>"$test_dir/no-tail-stock.stderr"
+"$new_telseq" -t 22 "$no_tail_bam" \
+    >"$test_dir/no-tail-parallel.stdout" \
+    2>"$test_dir/no-tail-parallel.stderr"
+
+if ! cmp -s \
+    "$test_dir/no-tail-stock.stdout" \
+    "$test_dir/no-tail-parallel.stdout"; then
+    diff -u \
+        "$test_dir/no-tail-stock.stdout" \
+        "$test_dir/no-tail-parallel.stdout" \
+        >"$test_dir/no-tail.diff" || true
+    echo "FAIL: no-tail fallback output differs from stock TelSeq" >&2
+    echo "Diff: $test_dir/no-tail.diff" >&2
+    exit 1
+fi
+
+expected_fallback_scan="[scan] HTSlib compatibility scanner fetched 20 indexed BAM records: 0 no-coordinate, 20 final-reference fallback; full sequential scans: 0"
+if ! grep -Fqx \
+    "$expected_fallback_scan" \
+    "$test_dir/no-tail-parallel.stderr"; then
+    echo "FAIL: no-tail compatibility path read more than the final reference" >&2
+    echo "Expected log: $expected_fallback_scan" >&2
+    exit 1
+fi
+
 echo
 echo "PASS: synthetic parallel test completed"
 echo "Expected legacy counts: Total=1130 Mapped=1120 Duplicates=3"
 echo "Fast tail access: 8 indexed records fetched; 0 full sequential scans"
+echo "No-tail fallback: 20 final-reference records fetched; stock output matched"
 echo "Artifacts: $test_dir"

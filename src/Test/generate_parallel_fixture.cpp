@@ -42,18 +42,23 @@ static BamTools::BamAlignment make_alignment(
 
 int main(int argc, char** argv)
 {
-    if (argc < 2 || argc > 4) {
+    if (argc < 2 || argc > 5) {
         std::cerr << "Usage: " << argv[0]
-                  << " OUTPUT.bam [READS_PER_REFERENCE [READ_LENGTH]]\n";
+                  << " OUTPUT.bam [READS_PER_REFERENCE [READ_LENGTH "
+                  << "[NO_COORDINATE_READS]]]\n";
         return 2;
     }
 
     const std::string bamPath = argv[1];
     const int readsPerReference = argc >= 3 ? std::atoi(argv[2]) : 20;
     const int readLength = argc >= 4 ? std::atoi(argv[3]) : 100;
-    if (readsPerReference < 1 || readLength < 100 || readLength > 100000) {
+    const int requestedNoCoordinateRecords =
+        argc >= 5 ? std::atoi(argv[4]) : 8;
+    if (readsPerReference < 1 || readLength < 100 || readLength > 100000 ||
+        requestedNoCoordinateRecords < 0) {
         std::cerr << "READS_PER_REFERENCE must be positive and READ_LENGTH "
-                  << "must be between 100 and 100000\n";
+                  << "must be between 100 and 100000; NO_COORDINATE_READS "
+                  << "must not be negative\n";
         return 2;
     }
 
@@ -146,14 +151,14 @@ int main(int argc, char** argv)
         }
     }
 
-    for (int i = 0; i < 8; ++i) {
+    for (int i = 0; i < requestedNoCoordinateRecords; ++i) {
         BamTools::BamAlignment alignment = make_alignment(
             "no-coordinate-" + std::to_string(i),
             -1,
             -1,
-            i == 7 ? telomeric : ordinary,
+            i == requestedNoCoordinateRecords - 1 ? telomeric : ordinary,
             false,
-            i == 7);
+            i == requestedNoCoordinateRecords - 1);
         if (!writer.SaveAlignment(alignment)) {
             std::cerr << writer.GetErrorString() << "\n";
             return 1;

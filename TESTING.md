@@ -50,7 +50,8 @@ and `-t 44`. Every stdout file must be byte-identical. It also checks that:
 - `-t 44` starts 43 indexed workers plus one HTSlib compatibility scanner;
 - the compatibility scanner fetches only the 8 indexed no-coordinate records,
   reports zero complete sequential scans, and retains the legacy EOF record;
-  and
+- a second no-tail fixture fetches only the 20 records on its highest populated
+  reference to recover the final mapped record and matches stock output; and
 - the output contains `Total=1130`, `Mapped=1120`, and `Duplicates=3`.
 
 The fixture contains 1,129 physical records. The expected `Total` of 1,130
