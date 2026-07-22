@@ -46,8 +46,11 @@ another unmodified TelSeq executable.
 The test compares stock TelSeq with the new binary at `-t 1`, `-t 2`, `-t 22`,
 and `-t 44`. Every stdout file must be byte-identical. It also checks that:
 
-- `-t 22` starts 21 indexed workers plus one compatibility scanner;
-- `-t 44` starts 43 indexed workers plus one compatibility scanner; and
+- `-t 22` starts 21 indexed workers plus one HTSlib compatibility scanner;
+- `-t 44` starts 43 indexed workers plus one HTSlib compatibility scanner;
+- the compatibility scanner fetches only the 8 indexed no-coordinate records,
+  reports zero complete sequential scans, and retains the legacy EOF record;
+  and
 - the output contains `Total=1130`, `Mapped=1120`, and `Duplicates=3`.
 
 The fixture contains 1,129 physical records. The expected `Total` of 1,130
@@ -58,6 +61,34 @@ BAM, index, stdout, stderr, timings, checksums, and any output differences.
 
 The fixture is designed for correctness, not performance. It is too small to
 measure useful parallel speedup.
+
+## Synthetic thread-scaling regression
+
+The Linux scaling regression creates a larger but highly compressible fixture,
+warms both worker layouts, runs each layout three times, and compares median
+wall time:
+
+```bash
+scripts/test_parallel_scaling.sh \
+    src/Telseq/telseq \
+    src/Test/generate_parallel_fixture
+```
+
+The test requires at least two logical CPUs. It verifies that `-t 2` and
+`-t 4` produce byte-identical stdout and requires the median `-t 4` wall time
+to be lower than the median `-t 2` wall time. The workload size can be changed
+without editing the script:
+
+```bash
+TELSEQ_SCALING_READS_PER_REFERENCE=8000 \
+TELSEQ_SCALING_READ_LENGTH=1000 \
+    scripts/test_parallel_scaling.sh \
+        src/Telseq/telseq \
+        src/Test/generate_parallel_fixture
+```
+
+This is a regression test for working concurrency, not a substitute for a
+representative WGS benchmark.
 
 ## Compare and benchmark on a real WGS BAM
 
@@ -180,21 +211,22 @@ make comparisons meaningful:
 6. Include `-t 1` as the new binary's sequential baseline when possible.
 
 The requested thread count is not a chromosome count. For `-t N`, one thread
-is reserved for the compatibility scanner and up to `N-1` workers dynamically
-consume whole-reference tasks. More threads than useful reference tasks do not
-create more parallel work.
+is reserved for the HTSlib compatibility scanner and up to `N-1` workers
+dynamically consume whole-reference tasks. More threads than useful reference
+tasks do not create more parallel work.
 
-Parallel mode intentionally performs a compatibility scan across the BAM in
-addition to indexed reference reads. This is required to retain stock output
-for no-coordinate alignments and the legacy final-record contribution, but it
-also limits the maximum possible speedup.
+The compatibility scanner uses the BAI to retrieve the no-coordinate tail
+directly. Its progress log reports how many indexed records it fetched and
+must report `full sequential scans: 0`. This retains no-coordinate alignments
+and stock TelSeq's legacy final-record contribution without reading the whole
+BAM a second time.
 
 ## Container validation
 
 The release workflow builds the Linux AMD64 container from the current source.
-As part of the Docker build it generates the synthetic indexed BAM, runs the
-container binary with `-t 1` and `-t 22`, and requires the two stdout files to
-be byte-identical before the image can be published.
+As part of the Docker build it runs the full stock-compatibility fixture,
+asserts indexed no-coordinate access, and runs the synthetic thread-scaling
+regression. The image cannot be published unless all of these checks pass.
 
 This container check complements rather than replaces comparison with an
 unmodified stock TelSeq binary. The full synthetic script and at least one

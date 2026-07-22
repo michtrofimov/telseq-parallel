@@ -16,14 +16,14 @@ original program, including its legacy counting behavior.
 The easiest installation is the released Linux AMD64 image:
 
 ```bash
-docker pull ghcr.io/michtrofimov/telseq-parallel:0.1.0
+docker pull ghcr.io/michtrofimov/telseq-parallel:0.2.0
 ```
 
 Check the installed version:
 
 ```bash
 docker run --rm \
-    ghcr.io/michtrofimov/telseq-parallel:0.1.0 \
+    ghcr.io/michtrofimov/telseq-parallel:0.2.0 \
     --version
 ```
 
@@ -37,6 +37,7 @@ Required build dependencies are:
 - a C++11 compiler;
 - Autoconf and Automake;
 - the [BamTools](https://github.com/pezmaster31/bamtools) development library;
+- the [HTSlib](https://github.com/samtools/htslib) development library;
 - zlib development headers;
 - POSIX threads.
 
@@ -45,7 +46,7 @@ On Debian or Ubuntu, the required packages can be installed with:
 ```bash
 sudo apt-get update
 sudo apt-get install \
-    autoconf automake build-essential libbamtools-dev zlib1g-dev
+    autoconf automake build-essential libbamtools-dev libhts-dev zlib1g-dev
 ```
 
 Build from the repository root:
@@ -67,6 +68,9 @@ subdirectories:
 make
 ```
 
+Use `--with-htslib=/path/to/htslib` in the same way when HTSlib is installed
+outside the system include and library paths.
+
 An installation prefix can also be selected in the usual way:
 
 ```bash
@@ -84,7 +88,7 @@ parallel mode, `-t > 1`, each BAM must:
 
 - be sorted by coordinate;
 - declare `SO:coordinate` in its header; and
-- have a BamTools-readable BAI or BTI index next to it.
+- have a standard BAI index next to it, readable by both BamTools and HTSlib.
 
 Common accepted index layouts are:
 
@@ -124,11 +128,13 @@ Scan the same BAM with 22 threads:
 telseq -t 22 -r 151 sample.bam > sample.telseq.tsv
 ```
 
-For `-t > 1`, one requested thread is reserved for a compatibility scan and
-the remaining threads consume complete reference-sequence tasks dynamically.
-For example, `-t 22` permits up to 21 indexed workers plus the compatibility
-scanner. A chromosome is not permanently assigned to a particular worker and
-is not divided between multiple workers.
+For `-t > 1`, one requested thread is reserved for a short HTSlib compatibility
+scan and the remaining threads consume complete reference-sequence tasks
+dynamically. For example, `-t 22` permits up to 21 indexed reference workers
+plus the compatibility scanner. The scanner retrieves the no-coordinate tail
+directly through the BAI instead of reading the complete BAM. A chromosome is
+not permanently assigned to a particular worker and is not divided between
+multiple workers.
 
 ### Multiple BAMs
 
@@ -241,7 +247,7 @@ the image name:
 ```bash
 docker run --rm \
     -v /path/to/bam-directory:/data:ro \
-    ghcr.io/michtrofimov/telseq-parallel:0.1.0 \
+    ghcr.io/michtrofimov/telseq-parallel:0.2.0 \
     -t 22 -r 151 /data/sample.bam \
     > sample.telseq.tsv
 ```
@@ -256,7 +262,7 @@ To process several BAMs from the mounted directory:
 ```bash
 docker run --rm \
     -v /path/to/bam-directory:/data:ro \
-    ghcr.io/michtrofimov/telseq-parallel:0.1.0 \
+    ghcr.io/michtrofimov/telseq-parallel:0.2.0 \
     -t 22 -r 151 /data/sample1.bam /data/sample2.bam \
     > results.tsv
 ```
@@ -271,23 +277,32 @@ docker build -t telseq-parallel:local .
 
 ### Observed real-WGS scaling
 
-TelSeq Parallel has been compared across 1, 4, 8, 12, 22, 44, and 80 threads
-on a real WGS BAM. In that environment, wall time fell from 54.62 minutes at
-`-t 1` to 38.15 minutes at `-t 4`, a 1.43× speedup. Higher thread counts did
-not improve wall time: every result from 4 through 80 threads remained within
-24 seconds of the fastest run.
+The original parallel implementation was compared across 1, 4, 8, 12, 22,
+44, and 80 threads on a real WGS BAM. In that environment, wall time fell from
+54.62 minutes at `-t 1` to 38.15 minutes at `-t 4`, a 1.43× speedup. Higher
+thread counts did not improve wall time: every result from 4 through 80
+threads remained within 24 seconds of the fastest run.
 
 ![Real WGS wall time by requested thread count](benchmarks/real-wgs-2026-07-21/wall-time-vs-threads.svg)
 
-For that BAM and infrastructure, `-t 4` was the best practical setting. This
-is not a universal recommendation: storage, cache state, BAM layout, and node
-hardware can change the optimum. See the
+Those measurements describe version 0.1, whose compatibility worker still
+read the entire BAM. Version 0.2 removes that sequential full-file pass, so
+the old `-t 4` optimum should not be assumed for the new implementation.
+Storage, cache state, BAM layout, and node hardware can still change the
+optimum. See the
 [complete benchmark, raw timings, and limitations](benchmarks/real-wgs-2026-07-21/README.md).
 
-More threads do not necessarily make a BAM scan faster. Parallel mode retains
-one full compatibility scan, while the indexed workers read reference-assigned
-records. Storage bandwidth, decompression, the number and size of references,
-and the operating-system page cache can all limit scaling.
+In version 0.2 the HTSlib compatibility worker requests only the indexed
+no-coordinate records. When that tail is present, the final tail record also
+supplies stock TelSeq's legacy EOF contribution. If no no-coordinate tail is
+present, the worker scans only the highest populated reference needed to
+recover the final physical record. It never performs the old full sequential
+BAM pass.
+
+More threads still do not guarantee better performance. Storage bandwidth,
+decompression, the number and size of references, and the operating-system
+page cache can all limit scaling. Rebenchmark version 0.2 on representative
+WGS data before choosing a production thread count.
 
 See [TESTING.md](TESTING.md) for correctness tests, comparison against stock
 TelSeq output, benchmark commands, forwarded analysis parameters, and guidance

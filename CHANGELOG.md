@@ -1,5 +1,33 @@
 # Changelog
 
+## 0.2.0 - 2026-07-22
+
+### Added
+
+- HTSlib-based direct indexed retrieval of no-coordinate BAM records;
+- scanner instrumentation reporting indexed records fetched and confirming
+  that no complete sequential scan was performed;
+- a release-gating test that proves the compatibility scanner reads only the
+  synthetic fixture's no-coordinate tail;
+- a synthetic scaling regression comparing median wall time at `-t 2` and
+  `-t 4` while requiring byte-identical output.
+
+### Changed
+
+- the compatibility worker no longer reads the entire BAM alongside the
+  indexed reference workers;
+- when a BAM has no no-coordinate tail, only its highest populated reference
+  is inspected to recover stock TelSeq's legacy final-record contribution;
+- parallel mode now requires a standard BAI readable by both BamTools and
+  HTSlib;
+- the Linux AMD64 container includes the HTSlib runtime.
+
+### Compatibility
+
+- the counting and tabular output calculation remain unchanged;
+- stock TelSeq's final-record contribution is intentionally retained;
+- `-t 1` continues to use the inherited sequential implementation.
+
 ## 0.1.0 - 2026-07-21
 
 First parallel TelSeq release.

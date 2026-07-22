@@ -25,16 +25,20 @@ RUN ./autogen.sh && \
     ./configure \
         --with-bamtools=/usr \
         --with-htslib=/usr \
-        --prefix=/opt/telseq && \
-    make -j2 && \
-    ../scripts/test_parallel_synthetic.sh \
+        --prefix=/opt/telseq
+
+RUN make -j2
+
+RUN ../scripts/test_parallel_synthetic.sh \
         ../bin/ubuntu/telseq \
         ./Telseq/telseq \
-        ./Test/generate_parallel_fixture && \
-    ../scripts/test_parallel_scaling.sh \
+        ./Test/generate_parallel_fixture
+
+RUN ../scripts/test_parallel_scaling.sh \
         ./Telseq/telseq \
-        ./Test/generate_parallel_fixture && \
-    make install
+        ./Test/generate_parallel_fixture
+
+RUN make install
 
 FROM ubuntu:${UBUNTU_VERSION} AS runtime
 
