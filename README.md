@@ -302,20 +302,22 @@ scripts/compare_and_benchmark_docker.sh \
 
 ### Observed real-WGS scaling
 
-The original parallel implementation was compared across 1, 4, 8, 12, 22,
-44, and 80 threads on a real WGS BAM. In that environment, wall time fell from
-54.62 minutes at `-t 1` to 38.15 minutes at `-t 4`, a 1.43× speedup. Higher
-thread counts did not improve wall time: every result from 4 through 80
-threads remained within 24 seconds of the fastest run.
+Version 0.2.0 was compared across 1, 4, 8, 12, 23, 46, and 80 requested
+threads on a real WGS BAM. Wall time fell from 55.14 minutes at `-t 1` to 5.60
+minutes at `-t 80`, a 9.85× speedup and an 89.85% reduction.
 
-![Real WGS wall time by requested thread count](benchmarks/real-wgs-2026-07-21/wall-time-vs-threads.svg)
+![TelSeq Parallel v0.2 real WGS wall time by requested thread count](benchmarks/real-wgs-2026-07-22-htslib/wall-time-vs-threads.svg)
 
-Those measurements describe version 0.1, whose compatibility worker still
-read the entire BAM. Version 0.2 removes that sequential full-file pass, so
-the old `-t 4` optimum should not be assumed for the new implementation.
-Storage, cache state, BAM layout, and node hardware can still change the
-optimum. See the
-[complete benchmark, raw timings, and limitations](benchmarks/real-wgs-2026-07-21/README.md).
+The practical knee was `-t 23`, which finished in 5.71 minutes. Increasing the
+request from 23 to 80 threads saved only 6.74 seconds, or 1.97%. At `-t 23`,
+22 mapped-reference workers can already process most long human chromosomes
+concurrently. Because reference tasks are not divided further, the slowest
+remaining chromosome, storage throughput, or decompression capacity can bound
+the run even when more workers are available.
+
+See the [complete version 0.2 benchmark, raw timings, and limitations](benchmarks/real-wgs-2026-07-22-htslib/README.md).
+The [version 0.1 benchmark](benchmarks/real-wgs-2026-07-21/README.md) is retained
+for comparison; its full-file compatibility scanner limited speedup to 1.43×.
 
 In version 0.2 the HTSlib compatibility worker requests only the indexed
 no-coordinate records. When that tail is present, the final tail record also
@@ -324,10 +326,10 @@ present, the worker scans only the highest populated reference needed to
 recover the final physical record. It never performs the old full sequential
 BAM pass.
 
-More threads still do not guarantee better performance. Storage bandwidth,
-decompression, the number and size of references, and the operating-system
-page cache can all limit scaling. Rebenchmark version 0.2 on representative
-WGS data before choosing a production thread count.
+More threads still do not guarantee better performance. For this tested BAM,
+`-t 23` is the best practical high-throughput choice and `-t 12` is a useful
+lower-resource choice. Rebenchmark on representative data before applying
+these settings to another storage system or BAM layout.
 
 See [TESTING.md](TESTING.md) for correctness tests, comparison against stock
 TelSeq output, benchmark commands, forwarded analysis parameters, and guidance

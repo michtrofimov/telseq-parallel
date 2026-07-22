@@ -50,6 +50,14 @@ def render(points):
         return TOP + (y_max - minutes) / (y_max - y_min) * plot_height
 
     best = min(points, key=lambda point: point["seconds"])
+    first = points[0]
+    last = points[-1]
+    description = (
+        f"Wall time falls from {first['seconds'] / 60:.2f} minutes with "
+        f"{first['threads']} requested thread to {best['seconds'] / 60:.2f} "
+        f"minutes at {best['threads']} threads. The final measurement at "
+        f"{last['threads']} threads is {last['seconds'] / 60:.2f} minutes."
+    )
     path_data = " ".join(
         ("M" if index == 0 else "L")
         + f" {x_position(point['threads']):.1f} {y_position(point['seconds'] / 60):.1f}"
@@ -59,7 +67,7 @@ def render(points):
     output = [
         f'<svg xmlns="http://www.w3.org/2000/svg" width="{WIDTH}" height="{HEIGHT}" viewBox="0 0 {WIDTH} {HEIGHT}" role="img" aria-labelledby="title description">',
         '<title id="title">TelSeq Parallel wall time versus requested threads</title>',
-        '<desc id="description">Wall time falls from 54.62 minutes with one thread to 38.15 minutes with four threads, then remains near 38.5 minutes through eighty threads.</desc>',
+        f'<desc id="description">{description}</desc>',
         "<style>",
         ".text{fill:#24292f;font:14px -apple-system,BlinkMacSystemFont,Segoe UI,sans-serif}",
         ".muted{fill:#57606a;font:13px -apple-system,BlinkMacSystemFont,Segoe UI,sans-serif}",
@@ -100,9 +108,16 @@ def render(points):
 
     best_x = x_position(best["threads"])
     best_y = y_position(best["seconds"] / 60)
+    annotation_x = best_x - 18 if best_x > WIDTH - RIGHT - 150 else best_x + 18
+    annotation_anchor = "end" if best_x > WIDTH - RIGHT - 150 else "start"
+    annotation_y = (
+        best_y - 28
+        if best_y > HEIGHT - BOTTOM - 45
+        else best_y + 29
+    )
     output.extend(
         [
-            f'<text class="text" x="{best_x + 18:.1f}" y="{best_y + 29:.1f}">fastest observed</text>',
+            f'<text class="text" x="{annotation_x:.1f}" y="{annotation_y:.1f}" text-anchor="{annotation_anchor}">fastest observed</text>',
             f'<text class="text" x="{(LEFT + WIDTH - RIGHT) / 2:.1f}" y="{HEIGHT - 20}" text-anchor="middle">Requested threads</text>',
             f'<text class="text" transform="translate(24 {(TOP + HEIGHT - BOTTOM) / 2:.1f}) rotate(-90)" text-anchor="middle">Wall time (minutes)</text>',
             "</svg>",

@@ -1,0 +1,67 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="520" viewBox="0 0 900 520" role="img" aria-labelledby="title description">
+<title id="title">TelSeq Parallel wall time versus requested threads</title>
+<desc id="description">Wall time falls from 55.14 minutes with 1 requested thread to 5.60 minutes at 80 threads. The final measurement at 80 threads is 5.60 minutes.</desc>
+<style>
+.text{fill:#24292f;font:14px -apple-system,BlinkMacSystemFont,Segoe UI,sans-serif}
+.muted{fill:#57606a;font:13px -apple-system,BlinkMacSystemFont,Segoe UI,sans-serif}
+.title{fill:#24292f;font:600 20px -apple-system,BlinkMacSystemFont,Segoe UI,sans-serif}
+.grid{stroke:#d0d7de;stroke-width:1}.axis{stroke:#57606a;stroke-width:1.5}
+.series{fill:none;stroke:#0969da;stroke-width:3}.point{fill:#0969da;stroke:#fff;stroke-width:2}
+.best{fill:#1a7f37;stroke:#fff;stroke-width:3}.guide{stroke:#1a7f37;stroke-width:1.5;stroke-dasharray:6 5}
+@media (prefers-color-scheme:dark){.text,.title{fill:#f0f6fc}.muted{fill:#8c959f}.grid{stroke:#30363d}.axis{stroke:#8c959f}.series{stroke:#58a6ff}.point{fill:#58a6ff;stroke:#0d1117}.best{fill:#3fb950;stroke:#0d1117}.guide{stroke:#3fb950}}
+</style>
+<text class="title" x="86" y="31">Real WGS wall time by requested thread count</text>
+<text class="muted" x="86" y="50">Lower is better · x-axis uses a log₂ scale</text>
+<line class="grid" x1="86" y1="442.0" x2="820" y2="442.0"/>
+<text class="muted" x="74" y="447.0" text-anchor="end">5</text>
+<line class="grid" x1="86" y1="407.1" x2="820" y2="407.1"/>
+<text class="muted" x="74" y="412.1" text-anchor="end">10</text>
+<line class="grid" x1="86" y1="372.2" x2="820" y2="372.2"/>
+<text class="muted" x="74" y="377.2" text-anchor="end">15</text>
+<line class="grid" x1="86" y1="337.3" x2="820" y2="337.3"/>
+<text class="muted" x="74" y="342.3" text-anchor="end">20</text>
+<line class="grid" x1="86" y1="302.4" x2="820" y2="302.4"/>
+<text class="muted" x="74" y="307.4" text-anchor="end">25</text>
+<line class="grid" x1="86" y1="267.5" x2="820" y2="267.5"/>
+<text class="muted" x="74" y="272.5" text-anchor="end">30</text>
+<line class="grid" x1="86" y1="232.5" x2="820" y2="232.5"/>
+<text class="muted" x="74" y="237.5" text-anchor="end">35</text>
+<line class="grid" x1="86" y1="197.6" x2="820" y2="197.6"/>
+<text class="muted" x="74" y="202.6" text-anchor="end">40</text>
+<line class="grid" x1="86" y1="162.7" x2="820" y2="162.7"/>
+<text class="muted" x="74" y="167.7" text-anchor="end">45</text>
+<line class="grid" x1="86" y1="127.8" x2="820" y2="127.8"/>
+<text class="muted" x="74" y="132.8" text-anchor="end">50</text>
+<line class="grid" x1="86" y1="92.9" x2="820" y2="92.9"/>
+<text class="muted" x="74" y="97.9" text-anchor="end">55</text>
+<line class="grid" x1="86" y1="58.0" x2="820" y2="58.0"/>
+<text class="muted" x="74" y="63.0" text-anchor="end">60</text>
+<line class="axis" x1="86" y1="58" x2="86" y2="442"/>
+<line class="axis" x1="86" y1="442" x2="820" y2="442"/>
+<line class="guide" x1="86" y1="437.8" x2="820" y2="437.8"/>
+<path class="series" d="M 86.0 91.9 L 318.2 324.6 L 434.3 407.5 L 502.2 431.2 L 611.2 437.0 L 727.3 437.7 L 820.0 437.8"/>
+<circle class="point" cx="86.0" cy="91.9" r="6"/>
+<text class="text" x="86.0" y="117.9" text-anchor="middle">55.14</text>
+<text class="muted" x="86.0" y="467" text-anchor="middle">1</text>
+<circle class="point" cx="318.2" cy="324.6" r="6"/>
+<text class="text" x="318.2" y="309.6" text-anchor="middle">21.82</text>
+<text class="muted" x="318.2" y="467" text-anchor="middle">4</text>
+<circle class="point" cx="434.3" cy="407.5" r="6"/>
+<text class="text" x="434.3" y="392.5" text-anchor="middle">9.93</text>
+<text class="muted" x="434.3" y="467" text-anchor="middle">8</text>
+<circle class="point" cx="502.2" cy="431.2" r="6"/>
+<text class="text" x="502.2" y="416.2" text-anchor="middle">6.54</text>
+<text class="muted" x="502.2" y="467" text-anchor="middle">12</text>
+<circle class="point" cx="611.2" cy="437.0" r="6"/>
+<text class="text" x="611.2" y="422.0" text-anchor="middle">5.71</text>
+<text class="muted" x="611.2" y="467" text-anchor="middle">23</text>
+<circle class="point" cx="727.3" cy="437.7" r="6"/>
+<text class="text" x="727.3" y="422.7" text-anchor="middle">5.62</text>
+<text class="muted" x="727.3" y="467" text-anchor="middle">46</text>
+<circle class="best" cx="820.0" cy="437.8" r="6"/>
+<text class="text" x="820.0" y="422.8" text-anchor="middle">5.60</text>
+<text class="muted" x="820.0" y="467" text-anchor="middle">80</text>
+<text class="text" x="802.0" y="409.8" text-anchor="end">fastest observed</text>
+<text class="text" x="453.0" y="500" text-anchor="middle">Requested threads</text>
+<text class="text" transform="translate(24 250.0) rotate(-90)" text-anchor="middle">Wall time (minutes)</text>
+</svg>

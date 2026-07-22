@@ -96,7 +96,10 @@ fi
 bam_dir=$(CDPATH= cd -- "$(dirname -- "$bam")" && pwd -P)
 bam_name=$(basename -- "$bam")
 bam="$bam_dir/$bam_name"
-container_bam="/data/$bam_name"
+# Preserve the host's absolute BAM path inside the container. The inherited
+# TelSeq implementation writes the input path to stdout, so mounting it at a
+# synthetic path such as /data would create a false output mismatch.
+container_bam=$bam
 
 case "$bam" in
     *.bam)
@@ -123,7 +126,7 @@ if [ -n "$docker_platform" ]; then
     docker_run+=(--platform "$docker_platform")
 fi
 docker_run+=(
-    --mount "type=bind,source=$bam_dir,target=/data,readonly"
+    --mount "type=bind,source=$bam_dir,target=$bam_dir,readonly"
     "$image"
 )
 

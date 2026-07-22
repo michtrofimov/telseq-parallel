@@ -159,11 +159,13 @@ scripts/compare_and_benchmark_docker.sh \
     -- -r 151 -k 7
 ```
 
-The BAM directory is mounted read-only at `/data` inside each container. The
-BAI must be next to the BAM. Analysis parameters after `--` are forwarded to
-TelSeq exactly as in the native benchmark. If an analysis option needs another
-input file, such as `-e`, place that file in the BAM directory and pass its
-container path, for example `-- -e /data/targets.bed`.
+The BAM directory is mounted read-only at the same absolute path inside each
+container. Preserving the path matters because inherited TelSeq writes the BAM
+path to stdout; mounting it at `/data` would cause a false checksum mismatch.
+The BAI must be next to the BAM. Analysis parameters after `--` are forwarded
+to TelSeq exactly as in the native benchmark. If an analysis option needs
+another input file, such as `-e`, place that file in the BAM directory and pass
+its absolute host path, which will also exist inside the container.
 
 The image targets Linux AMD64, so the wrapper passes
 `--platform linux/amd64` by default. Set `TELSEQ_DOCKER_PLATFORM` to an empty
