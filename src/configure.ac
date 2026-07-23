@@ -2,7 +2,7 @@
 # Process this file with autoconf to produce a configure script.
 
 AC_PREREQ([2.69])
-AC_INIT([TelSeq], [0.3.1], [https://github.com/michtrofimov/telseq-parallel/issues])
+AC_INIT([TelSeq], [0.3.2], [https://github.com/michtrofimov/telseq-parallel/issues])
 AM_INIT_AUTOMAKE(foreign)
 AC_CONFIG_SRCDIR([Telseq/telseq.cpp])
 AC_CONFIG_HEADERS([config.h])

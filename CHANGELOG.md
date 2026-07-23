@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.3.2 - 2026-07-23
+
 ### Added
 
 - append an integer `K` column to every result row so the effective automatic

@@ -18,14 +18,14 @@ threshold used for each result row.
 The easiest installation is the released Linux AMD64 image:
 
 ```bash
-docker pull ghcr.io/michtrofimov/telseq-parallel:0.3.1
+docker pull ghcr.io/michtrofimov/telseq-parallel:0.3.2
 ```
 
 Check the installed version:
 
 ```bash
 docker run --rm \
-    ghcr.io/michtrofimov/telseq-parallel:0.3.1 \
+    ghcr.io/michtrofimov/telseq-parallel:0.3.2 \
     --version
 ```
 
@@ -333,7 +333,7 @@ stdout from the two programs is no longer byte-identical even when every
 inherited value matches. The repository comparison scripts validate that `K`
 is an integer, remove only that column for the stock comparison, and then
 require all inherited output bytes to match. The numbered `0.3.1` image
-predates this additional column; it is present in later development builds.
+predates this additional column; it is included in version `0.3.2` and later.
 
 Print only the header when preparing a combined result file:
 
@@ -352,7 +352,7 @@ the image name:
 ```bash
 docker run --rm \
     -v /path/to/bam-directory:/data:ro \
-    ghcr.io/michtrofimov/telseq-parallel:0.3.1 \
+    ghcr.io/michtrofimov/telseq-parallel:0.3.2 \
     -t 22 -r 151 /data/sample.bam \
     > sample.telseq.tsv
 ```
@@ -367,7 +367,7 @@ To process several BAMs from the mounted directory:
 ```bash
 docker run --rm \
     -v /path/to/bam-directory:/data:ro \
-    ghcr.io/michtrofimov/telseq-parallel:0.3.1 \
+    ghcr.io/michtrofimov/telseq-parallel:0.3.2 \
     -t 22 -r 151 /data/sample1.bam /data/sample2.bam \
     > results.tsv
 ```
@@ -385,7 +385,7 @@ several thread counts, use the Docker benchmark wrapper documented in
 ```bash
 scripts/compare_and_benchmark_docker.sh \
     --reference-output stock-result.tsv \
-    ghcr.io/michtrofimov/telseq-parallel:0.3.1 \
+    ghcr.io/michtrofimov/telseq-parallel:0.3.2 \
     sample.bam \
     4 8 22 44 \
     -- -r 151
