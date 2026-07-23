@@ -55,10 +55,18 @@ and `-t 44`. Every stdout file must be byte-identical. It also checks that:
 - a long-reference fixture splits at 25-million-base boundaries and proves
   that reads ending at, spanning, and starting at a boundary contribute
   exactly once; and
+- automatic `k` selection gives 7, 10, and 11 for 100-, 150-, and 151-base
+  reads, adapts to custom motif length, and preserves an explicit override; and
 - the output contains `Total=1130`, `Mapped=1120`, and `Duplicates=3`.
 
 The fixture contains 1,129 physical records. The expected `Total` of 1,130
 preserves the original TelSeq final-record behavior.
+
+Stock TelSeq always uses an implicit default of `k=7`. TelSeq Parallel's
+automatic default is also 7 at the default 100-base read length, so the
+no-option compatibility fixture remains byte-identical. For other read
+lengths, pass the same explicit `-k` to both binaries when testing stock
+compatibility.
 
 The script prints its temporary artifact directory and retains the generated
 BAM, index, stdout, stderr, timings, checksums, and any output differences.

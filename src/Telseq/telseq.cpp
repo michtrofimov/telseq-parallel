@@ -68,7 +68,8 @@ static const char *TELSEQ_USAGE_MESSAGE =
 "   --primary-chromosomes-only\n"
 "                            analyse only human autosomes 1-22 and sex chromosomes X/Y; excludes contigs and no-coordinate reads.\n"
 "   --profile-references     emit per-reference worker timing records to standard error. requires -t > 1.\n"
-"   -k                       threshold of the amount of TTAGGG/CCCTAA repeats in read for a read to be considered telomeric. default = 7.\n"
+"   -k                       threshold of the amount of TTAGGG/CCCTAA repeats in read for a read to be considered telomeric.\n"
+"                            By default, use the smallest repeat count covering at least 40% of the configured read length.\n"
 "\nTesting functions\n------------\n"
 "   -r                       read length. default = 100\n"
 "   -z                       use user specified pattern for searching [ATGC]*.\n"
@@ -93,7 +94,8 @@ namespace opt
     static int referenceWindowSize = 25000000;
     static bool primaryChromosomesOnly = false;
     static bool profileReferences = false;
-    static int tel_k= ScanParameters::TEL_MOTIF_CUTOFF;
+    static int tel_k = 0;
+    static bool telKExplicit = false;
     static std::string unknown = "UNKNOWN";
     static std::string PATTERN;
     static std::string PATTERN_REV;
@@ -1383,7 +1385,7 @@ void printout(std::string rg, ScanResults result, std::ostream* pWriter){
 		std::cerr << "Telomere length estimate unknown. Possibly due to not enough representation of genome.\n";
 		*pWriter << opt::unknown << ScanParameters::FIELD_SEP;
 	}else if(result.telLenEstimate==0){
-		std::cerr << "Telomere length estimate unknown. No read contains more than " << opt::tel_k << " telomere repeats.\n";
+		std::cerr << "Telomere length estimate unknown. No read contains at least " << opt::tel_k << " telomere repeats.\n";
 		*pWriter << opt::unknown << ScanParameters::FIELD_SEP;
 	}
 	else{
@@ -1551,13 +1553,44 @@ void update_pattern(){
 	opt::PATTERN = ScanParameters::PATTERN;
 	opt::PATTERN_REV = ScanParameters::PATTERN_REVCOMP;
 
+    if(ScanParameters::PATTERN.empty()){
+        std::cerr << "telomere repeat pattern must not be empty\n";
+        exit(EXIT_FAILURE);
+    }
+
     // update total motif counts when read length and/or pattern have been specified by user
     ScanParameters::TEL_MOTIF_N = ScanParameters::READ_LENGTH/ScanParameters::PATTERN.size() +1;
+
+    if(!opt::telKExplicit){
+        // Require motif bases to cover at least 40% of the configured read:
+        //
+        //     k * motif_length / read_length >= 2 / 5
+        //
+        // Compute ceil(2 * read_length / (5 * motif_length)) with integer
+        // arithmetic so the boundary is exact and independent of floating
+        // point rounding.
+        const uint64_t numerator =
+            2ULL * static_cast<uint64_t>(ScanParameters::READ_LENGTH);
+        const uint64_t denominator =
+            5ULL * static_cast<uint64_t>(ScanParameters::PATTERN.size());
+        opt::tel_k = static_cast<int>(
+            (numerator + denominator - 1) / denominator);
+    }
+
 	if(opt::tel_k < 1 or opt::tel_k > ScanParameters::TEL_MOTIF_N-1){
 		std::cerr << "k out of bound. k must be an integer from 1 to " <<  ScanParameters::TEL_MOTIF_N-1 << "\n";
 		exit(EXIT_FAILURE);
 	}
 
+    std::cerr << "[parameters] telomeric repeat threshold k=" << opt::tel_k;
+    if(opt::telKExplicit){
+        std::cerr << " (explicit";
+    }else{
+        std::cerr << " (automatic minimum covering at least 40% of the read";
+    }
+    std::cerr << "; read length " << ScanParameters::READ_LENGTH
+              << "; motif length " << ScanParameters::PATTERN.size()
+              << ")\n";
 }
 
 
@@ -1595,7 +1628,16 @@ void parseScanOptions(int argc, char** argv)
         		std::cout << "\n";
         		exit(EXIT_SUCCESS);
             case 'k':
-            	arg >> opt::tel_k;
+                {
+                    int requestedK = 0;
+                    arg >> requestedK;
+                    if(!arg){
+                        std::cerr << "k must be an integer\n";
+                        exit(EXIT_FAILURE);
+                    }
+                    opt::tel_k = requestedK;
+                    opt::telKExplicit = true;
+                }
             	break;
             case 'r':
 				arg >> ScanParameters::READ_LENGTH;

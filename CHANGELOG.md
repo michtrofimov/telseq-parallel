@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+### Changed
+
+- when `-k` is omitted, select the smallest motif-repeat count covering at
+  least 40% of the configured read length; explicit `-k` values are unchanged.
+
+### Compatibility
+
+- the automatic threshold remains `k=7` for the default 100-base reads, but
+  differs from stock TelSeq's fixed implicit `k=7` at longer read lengths;
+  pass an explicit `-k 7` when reproducing that legacy behavior.
+
 ### Documentation
 
 - publish the real-WGS version 0.3 reference-window scaling benchmark, where

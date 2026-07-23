@@ -43,7 +43,6 @@ namespace ScanParameters{
 
 	// maximum motif counts. add 1 to include 0 count.
 	static uint64_t TEL_MOTIF_N = READ_LENGTH/PATTERN.size() +1;
-	const uint64_t TEL_MOTIF_CUTOFF = 7;
 	const int GC_BIN_N = (int) ((GC_UPPERBOUND-GC_LOWERBOUND)/GC_BINSIZE+0.5);
 
 	const std::string LABEL_RG="ReadGroup";

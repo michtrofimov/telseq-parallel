@@ -31,6 +31,46 @@ results_dir="$test_dir/results"
 
 "$fixture_generator" "$bam"
 
+assert_k_threshold() {
+    label=$1
+    expected=$2
+    shift 2
+
+    stdout_file="$test_dir/k-$label.stdout"
+    stderr_file="$test_dir/k-$label.stderr"
+    if ! "$new_telseq" "$@" "$bam" >"$stdout_file" 2>"$stderr_file"; then
+        echo "FAIL: k-threshold case $label did not run" >&2
+        sed -n '1,120p' "$stderr_file" >&2
+        exit 69
+    fi
+    if ! grep -Fqx "$expected" "$stderr_file"; then
+        echo "FAIL: k-threshold case $label selected the wrong value" >&2
+        echo "Expected: $expected" >&2
+        sed -n '1,40p' "$stderr_file" >&2
+        exit 70
+    fi
+}
+
+assert_k_threshold \
+    default \
+    "[parameters] telomeric repeat threshold k=7 (automatic minimum covering at least 40% of the read; read length 100; motif length 6)"
+assert_k_threshold \
+    read-150 \
+    "[parameters] telomeric repeat threshold k=10 (automatic minimum covering at least 40% of the read; read length 150; motif length 6)" \
+    -r 150
+assert_k_threshold \
+    read-151 \
+    "[parameters] telomeric repeat threshold k=11 (automatic minimum covering at least 40% of the read; read length 151; motif length 6)" \
+    -r 151
+assert_k_threshold \
+    explicit \
+    "[parameters] telomeric repeat threshold k=12 (explicit; read length 151; motif length 6)" \
+    -r 151 -k 12
+assert_k_threshold \
+    custom-motif \
+    "[parameters] telomeric repeat threshold k=10 (automatic minimum covering at least 40% of the read; read length 100; motif length 4)" \
+    -z TTAG
+
 if ! TELSEQ_BENCH_OUT="$results_dir" \
     TELSEQ_STOP_ON_MISMATCH=0 \
     "$repo_dir/scripts/compare_and_benchmark.sh" \
@@ -413,4 +453,5 @@ echo "No-tail fallback: 20 final-reference records fetched; stock output matched
 echo "Reference profile: 64 timed tasks with index estimates; standard output unchanged"
 echo "Window ownership: boundary-spanning records counted exactly once"
 echo "Primary filter: 1-22/X/Y and chr-prefixed aliases only; serial/parallel matched"
+echo "Automatic k: 40% rule and explicit override verified"
 echo "Artifacts: $test_dir"
