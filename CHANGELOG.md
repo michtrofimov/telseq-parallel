@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+### Fixed
+
+- require explicit `-k` values to be complete integers instead of accepting
+  an integer prefix from values such as `10.5` or `10x`.
+
 ## 0.3.1 - 2026-07-23
 
 ### Changed

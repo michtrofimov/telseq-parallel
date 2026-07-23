@@ -71,6 +71,27 @@ assert_k_threshold \
     "[parameters] telomeric repeat threshold k=10 (automatic minimum covering at least 40% of the read; read length 100; motif length 4)" \
     -z TTAG
 
+assert_invalid_k() {
+    label=$1
+    value=$2
+    stderr_file="$test_dir/k-invalid-$label.stderr"
+
+    if "$new_telseq" -k "$value" "$bam" \
+        >"$test_dir/k-invalid-$label.stdout" \
+        2>"$stderr_file"; then
+        echo "FAIL: invalid k value $value was accepted" >&2
+        exit 71
+    fi
+    if ! grep -Fqx "k must be an integer" "$stderr_file"; then
+        echo "FAIL: invalid k value $value produced the wrong error" >&2
+        sed -n '1,40p' "$stderr_file" >&2
+        exit 72
+    fi
+}
+
+assert_invalid_k decimal 10.5
+assert_invalid_k suffix 10x
+
 if ! TELSEQ_BENCH_OUT="$results_dir" \
     TELSEQ_STOP_ON_MISMATCH=0 \
     "$repo_dir/scripts/compare_and_benchmark.sh" \
@@ -453,5 +474,5 @@ echo "No-tail fallback: 20 final-reference records fetched; stock output matched
 echo "Reference profile: 64 timed tasks with index estimates; standard output unchanged"
 echo "Window ownership: boundary-spanning records counted exactly once"
 echo "Primary filter: 1-22/X/Y and chr-prefixed aliases only; serial/parallel matched"
-echo "Automatic k: 40% rule and explicit override verified"
+echo "Automatic k: integer 40% rule, explicit override, and invalid-input rejection verified"
 echo "Artifacts: $test_dir"

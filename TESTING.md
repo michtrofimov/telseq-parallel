@@ -56,7 +56,8 @@ and `-t 44`. Every stdout file must be byte-identical. It also checks that:
   that reads ending at, spanning, and starting at a boundary contribute
   exactly once; and
 - automatic `k` selection gives 7, 10, and 11 for 100-, 150-, and 151-base
-  reads, adapts to custom motif length, and preserves an explicit override; and
+  reads, adapts to custom motif length, preserves an explicit integer
+  override, and rejects fractional or suffixed values; and
 - the output contains `Total=1130`, `Mapped=1120`, and `Duplicates=3`.
 
 The fixture contains 1,129 physical records. The expected `Total` of 1,130

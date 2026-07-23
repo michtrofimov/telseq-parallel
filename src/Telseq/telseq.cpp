@@ -1630,8 +1630,12 @@ void parseScanOptions(int argc, char** argv)
             case 'k':
                 {
                     int requestedK = 0;
-                    arg >> requestedK;
-                    if(!arg){
+                    if(!(arg >> requestedK)){
+                        std::cerr << "k must be an integer\n";
+                        exit(EXIT_FAILURE);
+                    }
+                    arg >> std::ws;
+                    if(!arg.eof()){
                         std::cerr << "k must be an integer\n";
                         exit(EXIT_FAILURE);
                     }
