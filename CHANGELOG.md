@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.3.1 - 2026-07-23
+
 ### Changed
 
 - when `-k` is omitted, select the smallest motif-repeat count covering at
