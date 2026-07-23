@@ -1398,6 +1398,7 @@ void printout(std::string rg, ScanResults result, std::ostream* pWriter){
 	for (std::size_t k = 0, max = result.gccounts.size(); k != max; ++k){
 		*pWriter << result.gccounts[k] << ScanParameters::FIELD_SEP;
 	}
+	*pWriter << opt::tel_k << ScanParameters::FIELD_SEP;
 	*pWriter << "\n";
 }
 

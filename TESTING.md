@@ -1,8 +1,9 @@
 # Testing and benchmarking TelSeq Parallel
 
-Correctness comes before speed. A parallel run should produce byte-identical
-stdout to stock TelSeq when both programs receive the same BAM and the same
-analysis parameters. Only the thread count should differ.
+Correctness comes before speed. Parallel runs at different thread counts
+should produce byte-identical stdout when they receive the same BAM and
+analysis parameters. Against stock TelSeq, every inherited byte should match;
+TelSeq Parallel additionally appends a final integer `K` column.
 
 In particular, keep `-r`, `-k`, `-z`, `-e`, `-m`, `-u`, and `-w` identical.
 The read-length option `-r` changes the number of `TEL` columns as well as the
@@ -44,7 +45,9 @@ On Linux, use `bin/ubuntu/telseq` if it is compatible with the host, or supply
 another unmodified TelSeq executable.
 
 The test compares stock TelSeq with the new binary at `-t 1`, `-t 2`, `-t 22`,
-and `-t 44`. Every stdout file must be byte-identical. It also checks that:
+and `-t 44`. It validates and removes only the new final `K` column, then
+requires the remaining stdout to be byte-identical to stock. It also checks
+that:
 
 - `-t 22` starts 21 indexed workers plus one HTSlib compatibility scanner;
 - `-t 44` starts 43 indexed workers plus one HTSlib compatibility scanner;
@@ -57,7 +60,8 @@ and `-t 44`. Every stdout file must be byte-identical. It also checks that:
   exactly once; and
 - automatic `k` selection gives 7, 10, and 11 for 100-, 150-, and 151-base
   reads, adapts to custom motif length, preserves an explicit integer
-  override, and rejects fractional or suffixed values; and
+  override, rejects fractional or suffixed values, and writes the selected
+  integer to the final `K` column; and
 - the output contains `Total=1130`, `Mapped=1120`, and `Duplicates=3`.
 
 The fixture contains 1,129 physical records. The expected `Total` of 1,130
@@ -65,9 +69,9 @@ preserves the original TelSeq final-record behavior.
 
 Stock TelSeq always uses an implicit default of `k=7`. TelSeq Parallel's
 automatic default is also 7 at the default 100-base read length, so the
-no-option compatibility fixture remains byte-identical. For other read
-lengths, pass the same explicit `-k` to both binaries when testing stock
-compatibility.
+no-option compatibility fixture has identical inherited fields and an
+additional `K=7`. For other read lengths, pass the same explicit `-k` to both
+binaries when testing stock compatibility.
 
 The script prints its temporary artifact directory and retains the generated
 BAM, index, stdout, stderr, timings, checksums, and any output differences.
@@ -106,7 +110,8 @@ representative WGS benchmark.
 ## Compare and benchmark on a real WGS BAM
 
 The benchmark wrapper runs a grid of thread counts, captures timing and logs,
-and compares every stdout file byte-for-byte with a stock reference.
+validates the final integer `K`, and compares every inherited stdout byte with
+a stock reference.
 
 ### Run stock TelSeq as the reference
 
@@ -230,12 +235,15 @@ Each run writes a timestamped directory containing:
 A successful comparison prints:
 
 ```text
-PASS: -t 22 output is byte-identical to the reference
+PASS: -t 22 inherited fields are byte-identical; candidate appends integer K
 ```
 
 Matching `Total`, `Mapped`, and `Duplicates` columns alone is not sufficient.
-Compare the complete stdout because `LENGTH_ESTIMATE`, all `TEL` bins, and all
-`GC` bins participate in the result.
+The wrapper uses `scripts/compare_telseq_output.sh` to remove exactly one
+validated final `K` column before comparing against stock. It still compares
+the complete inherited stdout because `LENGTH_ESTIMATE`, all `TEL` bins, and
+all `GC` bins participate in the result. When both files already have the same
+schema, their complete stdout must be byte-identical.
 
 ## How to benchmark fairly
 

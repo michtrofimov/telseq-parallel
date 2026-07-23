@@ -55,6 +55,7 @@ namespace ScanParameters{
 	const std::string LABEL_TEL="TEL";
 	const std::string LABEL_GC="GC";
 	const std::string LABEL_LEN="LENGTH_ESTIMATE";
+	const std::string LABEL_K="K";
 
 	const std::string SCAN_FILE_SUFFIX = "bamscan";
 
@@ -118,6 +119,7 @@ struct Headers{
 			std::string h = ScanParameters::LABEL_GC + NumberToString(i);
 			headers.push_back(h);
 		}
+		headers.push_back(ScanParameters::LABEL_K);
 	}
 	std::vector<std::string> headers;
 

@@ -17,8 +17,10 @@ new_telseq=$2
 script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 repo_dir=$(CDPATH= cd -- "$script_dir/.." && pwd)
 fixture_generator=${3:-"$repo_dir/src/Test/generate_parallel_fixture"}
+output_comparator="$repo_dir/scripts/compare_telseq_output.sh"
 
-for executable in "$stock_telseq" "$new_telseq" "$fixture_generator"; do
+for executable in \
+    "$stock_telseq" "$new_telseq" "$fixture_generator" "$output_comparator"; do
     if [ ! -x "$executable" ]; then
         echo "Error: executable not found: $executable" >&2
         exit 2
@@ -33,8 +35,9 @@ results_dir="$test_dir/results"
 
 assert_k_threshold() {
     label=$1
-    expected=$2
-    shift 2
+    expected_log=$2
+    expected_k=$3
+    shift 3
 
     stdout_file="$test_dir/k-$label.stdout"
     stderr_file="$test_dir/k-$label.stderr"
@@ -43,32 +46,58 @@ assert_k_threshold() {
         sed -n '1,120p' "$stderr_file" >&2
         exit 69
     fi
-    if ! grep -Fqx "$expected" "$stderr_file"; then
+    if ! grep -Fqx "$expected_log" "$stderr_file"; then
         echo "FAIL: k-threshold case $label selected the wrong value" >&2
-        echo "Expected: $expected" >&2
+        echo "Expected: $expected_log" >&2
         sed -n '1,40p' "$stderr_file" >&2
         exit 70
+    fi
+    if ! awk -F '\t' -v expected="$expected_k" '
+        $1 == "ReadGroup" && $2 == "Library" && $3 == "Sample" &&
+        $4 == "Total" && $5 == "Mapped" && $6 == "Duplicates" &&
+        $7 == "LENGTH_ESTIMATE" {
+            headers += 1
+            if ($(NF - 1) != "K") invalid = 1
+            next
+        }
+        headers && NF > 1 && $NF == "" {
+            rows += 1
+            if ($(NF - 1) !~ /^[0-9]+$/ || $(NF - 1) != expected) {
+                invalid = 1
+            }
+        }
+        END {
+            if (headers != 1 || rows < 1 || invalid) exit 1
+        }
+    ' "$stdout_file"; then
+        echo "FAIL: k-threshold case $label did not append integer K=$expected_k" >&2
+        exit 73
     fi
 }
 
 assert_k_threshold \
     default \
-    "[parameters] telomeric repeat threshold k=7 (automatic minimum covering at least 40% of the read; read length 100; motif length 6)"
+    "[parameters] telomeric repeat threshold k=7 (automatic minimum covering at least 40% of the read; read length 100; motif length 6)" \
+    7
 assert_k_threshold \
     read-150 \
     "[parameters] telomeric repeat threshold k=10 (automatic minimum covering at least 40% of the read; read length 150; motif length 6)" \
+    10 \
     -r 150
 assert_k_threshold \
     read-151 \
     "[parameters] telomeric repeat threshold k=11 (automatic minimum covering at least 40% of the read; read length 151; motif length 6)" \
+    11 \
     -r 151
 assert_k_threshold \
     explicit \
     "[parameters] telomeric repeat threshold k=12 (explicit; read length 151; motif length 6)" \
+    12 \
     -r 151 -k 12
 assert_k_threshold \
     custom-motif \
     "[parameters] telomeric repeat threshold k=10 (automatic minimum covering at least 40% of the read; read length 100; motif length 4)" \
+    10 \
     -z TTAG
 
 assert_invalid_k() {
@@ -163,9 +192,9 @@ if ! TELSEQ_BENCH_OUT="$results_dir" \
     diagnostic_code=31
     for thread_count in 1 2 22 44; do
         label="threads-$thread_count"
-        if ! cmp -s \
+        if ! "$output_comparator" \
             "$results_dir/stock.stdout" \
-            "$results_dir/$label.stdout"; then
+            "$results_dir/$label.stdout" >/dev/null; then
             echo "FAIL[$diagnostic_code]: $label output differs from stock" >&2
             exit "$diagnostic_code"
         fi
@@ -287,9 +316,10 @@ if ! "$new_telseq" --profile-references -t 22 "$window_bam" \
     exit 29
 fi
 
-if ! cmp -s "$window_stock_stdout" "$window_parallel_stdout"; then
-    diff -u "$window_stock_stdout" "$window_parallel_stdout" \
-        >"$test_dir/window-boundary.diff" || true
+if ! "$output_comparator" \
+    "$window_stock_stdout" \
+    "$window_parallel_stdout" \
+    "$test_dir/window-boundary.diff" >/dev/null; then
     echo "FAIL: window-boundary output differs from stock TelSeq" >&2
     echo "Diff: $test_dir/window-boundary.diff" >&2
     exit 30
@@ -445,13 +475,10 @@ if ! "$new_telseq" -t 22 "$no_tail_bam" \
     exit 17
 fi
 
-if ! cmp -s \
+if ! "$output_comparator" \
     "$test_dir/no-tail-stock.stdout" \
-    "$test_dir/no-tail-parallel.stdout"; then
-    diff -u \
-        "$test_dir/no-tail-stock.stdout" \
-        "$test_dir/no-tail-parallel.stdout" \
-        >"$test_dir/no-tail.diff" || true
+    "$test_dir/no-tail-parallel.stdout" \
+    "$test_dir/no-tail.diff" >/dev/null; then
     echo "FAIL: no-tail fallback output differs from stock TelSeq" >&2
     echo "Diff: $test_dir/no-tail.diff" >&2
     exit 18
@@ -474,5 +501,5 @@ echo "No-tail fallback: 20 final-reference records fetched; stock output matched
 echo "Reference profile: 64 timed tasks with index estimates; standard output unchanged"
 echo "Window ownership: boundary-spanning records counted exactly once"
 echo "Primary filter: 1-22/X/Y and chr-prefixed aliases only; serial/parallel matched"
-echo "Automatic k: integer 40% rule, explicit override, and invalid-input rejection verified"
+echo "Automatic k: integer 40% rule, explicit override, stdout K column, and invalid-input rejection verified"
 echo "Artifacts: $test_dir"

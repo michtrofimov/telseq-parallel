@@ -2,10 +2,23 @@
 
 ## Unreleased
 
+### Added
+
+- append an integer `K` column to every result row so the effective automatic
+  or explicit telomeric-repeat threshold is recorded with the estimate.
+- stock-output comparison helpers validate and remove only the additional
+  final `K` column before requiring every inherited output byte to match.
+
 ### Fixed
 
 - require explicit `-k` values to be complete integers instead of accepting
   an integer prefix from values such as `10.5` or `10x`.
+
+### Compatibility
+
+- result calculations and inherited columns remain unchanged, but raw stdout
+  is no longer byte-identical to unmodified stock TelSeq because of the
+  additional final `K` column.
 
 ## 0.3.1 - 2026-07-23
 

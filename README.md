@@ -6,8 +6,10 @@ BAM files. It is a multithreaded fork of
 of a single BAM with `-t` / `--threads`.
 
 This is an independently maintained fork, not the official upstream TelSeq
-distribution. The calculation and tabular output are kept compatible with the
-original program, including its legacy counting behavior.
+distribution. The calculation and inherited result columns are kept compatible
+with the original program, including its legacy counting behavior. TelSeq
+Parallel appends one additional `K` column reporting the effective repeat
+threshold used for each result row.
 
 ## Installation
 
@@ -252,7 +254,7 @@ telseq -t 22 -r 151 -o sample.telseq.tsv sample.bam
 | `--primary-chromosomes-only` | off | Analyze only exact human autosomes 1–22 and sex chromosomes X/Y, with an optional `chr` prefix. Excludes all other references and no-coordinate reads. |
 | `--profile-references` | off | With `-t > 1`, write one tab-separated timing record per mapped-reference window task to stderr. |
 | `-r INT` | `100` | Read length in bases. Controls the supported motif-count range and therefore the number of `TEL` columns. |
-| `-k INT` | automatic | Minimum number of `TTAGGG` or `CCCTAA` repeats for a read to contribute to the telomeric-read numerator. When omitted, the smallest integer covering at least 40% of the configured read length is used. |
+| `-k INT` | automatic | Integer minimum number of `TTAGGG` or `CCCTAA` repeats for a read to contribute to the telomeric-read numerator. When omitted, the smallest integer covering at least 40% of the configured read length is used. |
 | `-f FILE`, `--bamlist=FILE` | — | Read BAM paths from a one-column file. Positional BAM arguments are ignored when this is used. |
 | `-o FILE`, `--output-dir=FILE` | stdout | Write the result table to this file. The inherited long-option name says “directory”, but the value is a file path. |
 | `-H` | off | Suppress the output header. Useful when appending several runs. |
@@ -277,6 +279,8 @@ k = ceil(0.40 * read_length / motif_length)
 
 For the standard six-base motif this gives `k=7` at `-r 100`, `k=10` at
 `-r 150`, and `k=11` at `-r 151`. An explicit `-k` always takes precedence.
+The effective integer is written to the final `K` column in every result row
+and is also reported in the progress log on stderr.
 Stock TelSeq always defaults to `k=7`, so comparisons using a read length other
 than 100 must pass the same explicit `-k` to both programs if stock-default
 compatibility is required.
@@ -314,6 +318,7 @@ group per BAM; `-u` and `-m` change that grouping behavior.
 | `LENGTH_ESTIMATE` | Estimated average telomere length in kilobases, or `UNKNOWN` when it cannot be calculated. |
 | `TELn` | Reads containing exactly `n` copies of the motif or its reverse complement. |
 | `GCn` | Reads in a two-percentage-point GC bin between 40% and 60%. |
+| `K` | Effective integer telomeric-repeat threshold, whether selected automatically or supplied with `-k`. |
 
 The `TEL` columns depend on read length and motif length. With the default
 six-base motif, `-r 100` produces `TEL0` through `TEL16`, while `-r 151`
@@ -322,6 +327,13 @@ means the runs used different `-r` or `-z` values.
 
 There are ten GC columns: `GC0` represents 40–42% GC, `GC1` represents
 42–44%, and so on through `GC9`, which represents 58–60%.
+
+`K` is the final column. Because unmodified stock TelSeq does not emit it, raw
+stdout from the two programs is no longer byte-identical even when every
+inherited value matches. The repository comparison scripts validate that `K`
+is an integer, remove only that column for the stock comparison, and then
+require all inherited output bytes to match. The numbered `0.3.1` image
+predates this additional column; it is present in later development builds.
 
 Print only the header when preparing a combined result file:
 

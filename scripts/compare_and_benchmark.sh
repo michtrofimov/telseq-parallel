@@ -13,6 +13,13 @@ if [ "$#" -lt 3 ]; then
     exit 2
 fi
 
+script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+output_comparator="$script_dir/compare_telseq_output.sh"
+if [ ! -x "$output_comparator" ]; then
+    echo "Error: output comparator is not executable: $output_comparator" >&2
+    exit 2
+fi
+
 reference_mode=executable
 case "$1" in
     --reference-output)
@@ -222,13 +229,18 @@ for thread_count in "${thread_grid[@]}"; do
         continue
     fi
 
-    if cmp -s "$reference_stdout" "$output_dir/${label}.stdout"; then
-        echo "PASS: -t $thread_count output is byte-identical to the reference"
+    comparison_diff="$output_dir/${label}.diff"
+    if comparison_mode=$("$output_comparator" \
+        "$reference_stdout" "$output_dir/${label}.stdout" "$comparison_diff"); then
+        if [ "$comparison_mode" = "exact" ]; then
+            echo "PASS: -t $thread_count output is byte-identical to the reference"
+        else
+            echo "PASS: -t $thread_count inherited fields are byte-identical; candidate appends integer K"
+        fi
+        rm -f "$comparison_diff"
     else
         echo "FAIL: -t $thread_count output differs from the reference" >&2
-        diff -u "$reference_stdout" "$output_dir/${label}.stdout" \
-            > "$output_dir/${label}.diff" || true
-        echo "Diff: $output_dir/${label}.diff" >&2
+        echo "Diff: $comparison_diff" >&2
         had_failure=1
         if [ "$stop_on_mismatch" != "0" ]; then
             break
