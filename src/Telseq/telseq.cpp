@@ -11,9 +11,13 @@
 #include <map>
 #include <atomic>
 #include <chrono>
+#include <cerrno>
 #include <cctype>
 #include <cstdio>
+#include <cstdlib>
+#include <cstring>
 #include <exception>
+#include <fcntl.h>
 #include <iomanip>
 #include <memory>
 #include <mutex>
@@ -57,7 +61,8 @@ static const char *TELSEQ_USAGE_MESSAGE =
 "                            with each row a BAM file path. -f has higher priority than <in.bam>. When specified, \n"
 "                            <in.bam> are ignored.\n"
 "   --output-tsv=PATH        result TSV path. default = <BAM basename>.telseq.tsv in the current directory.\n"
-"   --output-log=PATH        progress and reference-profile log path. default = <BAM basename>.telseq.log.\n"
+"   --output-log=PATH        progress and reference-profile log path. default = <BAM basename>.telseq.log;\n"
+"                            file-output runs also stream the log to stdout in real time.\n"
 "   -o, --output-dir=PATH    deprecated alias for --output-tsv.\n"
 "   -H                       remove header line, which is printed by default.\n"
 "   -h                       print the header line only. The text can be used to attach to result files, useful\n"
@@ -1876,6 +1881,205 @@ static void configure_artifact_paths()
     }
 }
 
+class StderrLogTee
+{
+public:
+    StderrLogTee(const std::string& logPath, bool mirrorToStdout)
+        : logPath_(logPath), mirrorToStdout_(mirrorToStdout),
+          logIsStdout_(false), savedStderr_(-1), logFd_(-1),
+          readFd_(-1), active_(false)
+    {
+    }
+
+    ~StderrLogTee()
+    {
+        stop();
+    }
+
+    bool start(std::string& error)
+    {
+        if(!exitHandlerRegistered()){
+            if(std::atexit(&StderrLogTee::stopAtExit) != 0){
+                error = "could not register live-log cleanup";
+                return false;
+            }
+            exitHandlerRegistered() = true;
+        }
+
+        std::cerr.flush();
+        std::fflush(stderr);
+
+        savedStderr_ = dup(STDERR_FILENO);
+        if(savedStderr_ < 0){
+            error = "could not preserve standard error: ";
+            error += std::strerror(errno);
+            return false;
+        }
+
+        if(logPath_ == "/dev/stderr"){
+            logFd_ = dup(savedStderr_);
+        }else if(logPath_ == "/dev/stdout"){
+            logFd_ = dup(STDOUT_FILENO);
+            logIsStdout_ = true;
+        }else{
+            logFd_ = open(logPath_.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0666);
+        }
+        if(logFd_ < 0){
+            error = "could not open log file for writing: " + logPath_ + ": ";
+            error += std::strerror(errno);
+            close(savedStderr_);
+            savedStderr_ = -1;
+            return false;
+        }
+
+        int pipeFds[2] = {-1, -1};
+        if(pipe(pipeFds) != 0){
+            error = "could not create the live log stream: ";
+            error += std::strerror(errno);
+            close(logFd_);
+            close(savedStderr_);
+            logFd_ = -1;
+            savedStderr_ = -1;
+            return false;
+        }
+
+        if(dup2(pipeFds[1], STDERR_FILENO) < 0){
+            error = "could not route standard error to the live log stream: ";
+            error += std::strerror(errno);
+            close(pipeFds[0]);
+            close(pipeFds[1]);
+            close(logFd_);
+            close(savedStderr_);
+            logFd_ = -1;
+            savedStderr_ = -1;
+            return false;
+        }
+
+        close(pipeFds[1]);
+        readFd_ = pipeFds[0];
+        try{
+            pumpThread_ = std::thread(&StderrLogTee::pump, this);
+        }catch(const std::exception& exception){
+            if(dup2(savedStderr_, STDERR_FILENO) < 0){
+                close(STDERR_FILENO);
+            }
+            error = "could not start the live log stream: ";
+            error += exception.what();
+            close(readFd_);
+            close(logFd_);
+            close(savedStderr_);
+            readFd_ = -1;
+            logFd_ = -1;
+            savedStderr_ = -1;
+            std::cerr.clear();
+            return false;
+        }
+
+        active_ = true;
+        activeInstance() = this;
+        std::cerr.clear();
+        return true;
+    }
+
+    void stop()
+    {
+        if(!active_){
+            return;
+        }
+
+        std::cerr.flush();
+        std::fflush(stderr);
+        if(dup2(savedStderr_, STDERR_FILENO) < 0){
+            close(STDERR_FILENO);
+        }
+        close(savedStderr_);
+        savedStderr_ = -1;
+        if(pumpThread_.joinable()){
+            pumpThread_.join();
+        }
+        if(activeInstance() == this){
+            activeInstance() = NULL;
+        }
+        std::cerr.clear();
+        active_ = false;
+    }
+
+private:
+    static StderrLogTee*& activeInstance()
+    {
+        static StderrLogTee* instance = NULL;
+        return instance;
+    }
+
+    static bool& exitHandlerRegistered()
+    {
+        static bool registered = false;
+        return registered;
+    }
+
+    static void stopAtExit()
+    {
+        if(activeInstance() != NULL){
+            activeInstance()->stop();
+        }
+    }
+
+    static void writeAll(int descriptor, const char* buffer, std::size_t size)
+    {
+        while(size > 0){
+            ssize_t written = write(descriptor, buffer, size);
+            if(written < 0){
+                if(errno == EINTR){
+                    continue;
+                }
+                return;
+            }
+            if(written == 0){
+                return;
+            }
+            buffer += written;
+            size -= static_cast<std::size_t>(written);
+        }
+    }
+
+    void pump()
+    {
+        char buffer[8192];
+        while(true){
+            ssize_t count = read(readFd_, buffer, sizeof(buffer));
+            if(count == 0){
+                break;
+            }
+            if(count < 0){
+                if(errno == EINTR){
+                    continue;
+                }
+                break;
+            }
+
+            const std::size_t size = static_cast<std::size_t>(count);
+            writeAll(logFd_, buffer, size);
+            if(mirrorToStdout_ && !logIsStdout_){
+                writeAll(STDOUT_FILENO, buffer, size);
+            }
+        }
+
+        close(readFd_);
+        close(logFd_);
+        readFd_ = -1;
+        logFd_ = -1;
+    }
+
+    std::string logPath_;
+    bool mirrorToStdout_;
+    bool logIsStdout_;
+    int savedStderr_;
+    int logFd_;
+    int readFd_;
+    bool active_;
+    std::thread pumpThread_;
+};
+
 
 
 int main(int argc, char** argv)
@@ -1883,25 +2087,16 @@ int main(int argc, char** argv)
 	parseScanOptions(argc, argv);
     configure_artifact_paths();
 
-    int savedStderr = -1;
-    if(opt::outputLog != "/dev/stderr"){
-        std::cerr.flush();
-        std::fflush(stderr);
-        savedStderr = dup(STDERR_FILENO);
-        if(savedStderr < 0){
-            std::cerr << "Error: could not preserve standard error before "
-                      << "opening log file\n";
-            return EXIT_FAILURE;
-        }
-        if(std::freopen(opt::outputLog.c_str(), "w", stderr) == NULL){
-            dup2(savedStderr, STDERR_FILENO);
-            close(savedStderr);
-            std::cerr.clear();
-            std::cerr << "Error: could not open log file for writing: "
-                      << opt::outputLog << "\n";
-            return EXIT_FAILURE;
-        }
-        std::cerr.clear();
+    StderrLogTee logTee(opt::outputLog, opt::outputfile != "/dev/stdout");
+    std::string logTeeError;
+    if(!logTee.start(logTeeError)){
+        std::cerr << "Error: " << logTeeError << "\n";
+        return EXIT_FAILURE;
+    }
+
+    if(opt::outputfile != "/dev/stdout"){
+        std::cout << "TelSeq started: result TSV " << opt::outputfile
+                  << "; profile log " << opt::outputLog << std::endl;
     }
 
     update_pattern();
@@ -1924,18 +2119,10 @@ int main(int argc, char** argv)
         if(!outputProbe){
             std::cerr << "Error: could not open result TSV for writing: "
                       << opt::outputfile << "\n";
-            if(savedStderr >= 0){
-                std::cerr.flush();
-                std::fflush(stderr);
-                dup2(savedStderr, STDERR_FILENO);
-                close(savedStderr);
-                std::cerr.clear();
-            }
+            logTee.stop();
             return EXIT_FAILURE;
         }
 
-        std::cout << "TelSeq started: result TSV " << opt::outputfile
-                  << "; profile log " << opt::outputLog << std::endl;
     }
 
     int status = EXIT_FAILURE;
@@ -1944,13 +2131,7 @@ int main(int argc, char** argv)
         status = scanBam();
     }
 
-    if(savedStderr >= 0){
-        std::cerr.flush();
-        std::fflush(stderr);
-        dup2(savedStderr, STDERR_FILENO);
-        close(savedStderr);
-        std::cerr.clear();
-    }
+    logTee.stop();
     if(status != 0){
         std::cerr << "TelSeq failed; see log: " << opt::outputLog << "\n";
     }else if(opt::outputfile != "/dev/stdout"){

@@ -18,14 +18,14 @@ threshold used for each result row.
 The easiest installation is the released Linux AMD64 image:
 
 ```bash
-docker pull ghcr.io/michtrofimov/telseq-parallel:0.4.0
+docker pull ghcr.io/michtrofimov/telseq-parallel:0.4.1
 ```
 
 Check the installed version:
 
 ```bash
 docker run --rm \
-    ghcr.io/michtrofimov/telseq-parallel:0.4.0 \
+    ghcr.io/michtrofimov/telseq-parallel:0.4.1 \
     --version
 ```
 
@@ -154,8 +154,8 @@ telseq -t 22 -r 151 sample.bam
 
 Both commands create `sample.telseq.tsv` and `sample.telseq.log` in the
 current working directory. Parallel logs include the reference-window profile
-by default. Standard output reports the selected paths when the scan starts
-and again when it completes.
+by default. The complete log is also streamed to standard output in real time,
+with short start and completion messages showing the selected paths.
 
 For `-t > 1`, one requested thread is reserved for a short HTSlib compatibility
 scan and the remaining threads consume indexed reference-window tasks
@@ -265,10 +265,10 @@ telseq -t 22 -r 151 \
 
 `-o` and the inherited `--output-dir` name remain aliases for
 `--output-tsv`. Existing files at the selected paths are replaced. The TSV
-and log paths must differ and may not name an input BAM. File-output runs
-write concise start and completion messages with both paths to standard
-output. When `--output-tsv /dev/stdout` is selected, no status text is added
-to that TSV stream.
+and log paths must differ and may not name an input BAM. File-output runs tee
+the complete log to standard output in real time and add concise start and
+completion messages with both paths. When `--output-tsv /dev/stdout` is
+selected, neither log nor status text is added to that TSV stream.
 
 ## Parameters
 
@@ -382,7 +382,7 @@ docker run --rm \
     -v /path/to/bam-directory:/data:ro \
     -v "$PWD:/output" \
     -w /output \
-    ghcr.io/michtrofimov/telseq-parallel:0.4.0 \
+    ghcr.io/michtrofimov/telseq-parallel:0.4.1 \
     -t 22 -r 151 /data/sample.bam
 ```
 
@@ -397,7 +397,7 @@ To process several BAMs from the mounted directory:
 docker run --rm \
     -v /path/to/bam-directory:/data:ro \
     -v "$PWD:/output" \
-    ghcr.io/michtrofimov/telseq-parallel:0.4.0 \
+    ghcr.io/michtrofimov/telseq-parallel:0.4.1 \
     -t 22 -r 151 \
     --output-tsv /output/results.telseq.tsv \
     --output-log /output/results.telseq.log \
@@ -417,7 +417,7 @@ several thread counts, use the Docker benchmark wrapper documented in
 ```bash
 scripts/compare_and_benchmark_docker.sh \
     --reference-output stock-result.tsv \
-    ghcr.io/michtrofimov/telseq-parallel:0.4.0 \
+    ghcr.io/michtrofimov/telseq-parallel:0.4.1 \
     sample.bam \
     4 8 22 44 \
     -- -r 151

@@ -343,6 +343,14 @@ if [ "$(grep -c '^TelSeq ' "$default_console_stdout")" -ne 2 ] ||
     sed -n '1,20p' "$default_console_stdout" >&2
     exit 76
 fi
+mirrored_default_log="$test_dir/default-artifacts.mirrored.log"
+sed '/^TelSeq started:/d; /^TelSeq completed:/d' \
+    "$default_console_stdout" >"$mirrored_default_log"
+if ! cmp -s "$default_log" "$mirrored_default_log"; then
+    echo "FAIL: stdout is not a complete live copy of the default log" >&2
+    diff -u "$default_log" "$mirrored_default_log" >&2 || true
+    exit 76
+fi
 if ! grep -q '^\[reference-profile\]' "$default_log"; then
     echo "FAIL: default log does not contain reference-profile rows" >&2
     exit 77

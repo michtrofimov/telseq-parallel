@@ -65,8 +65,8 @@ that:
 - a single BAM creates `<basename>.telseq.tsv` and `<basename>.telseq.log` by
   default, explicit artifact paths work, `-o` remains a TSV alias, and the
   default parallel log contains reference-profile rows; the default run also
-  reports its artifact paths at start and completion without writing status
-  text into direct TSV streams; and
+  streams an exact copy of that log to stdout around its start/completion
+  messages without writing log or status text into direct TSV streams; and
 - the output contains `Total=1130`, `Mapped=1120`, and `Duplicates=3`.
 
 The fixture contains 1,129 physical records. The expected `Total` of 1,130
@@ -177,7 +177,7 @@ stock TelSeq output without installing the new executable on the host:
 ```bash
 scripts/compare_and_benchmark_docker.sh \
     --reference-output /path/to/stock-result.tsv \
-    ghcr.io/michtrofimov/telseq-parallel:0.4.0 \
+    ghcr.io/michtrofimov/telseq-parallel:0.4.1 \
     /path/to/sample.bam \
     4 8 22 44 \
     -- -r 151 -k 7

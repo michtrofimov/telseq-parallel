@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+## 0.4.1 - 2026-07-28
+
+### Changed
+
+- file-output runs stream the complete progress and reference-profile log to
+  standard output in real time while also saving it to `--output-log`;
+- direct result streaming with `--output-tsv /dev/stdout` keeps stdout
+  byte-clean and continues routing diagnostics only to the selected log.
+
 ## 0.4.0 - 2026-07-28
 
 ### Changed
