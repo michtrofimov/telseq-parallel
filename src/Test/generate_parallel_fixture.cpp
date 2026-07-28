@@ -18,7 +18,8 @@ static BamTools::BamAlignment make_alignment(
     const int position,
     const std::string& sequence,
     const bool mapped,
-    const bool duplicate)
+    const bool duplicate,
+    const std::string& readGroup = "rg1")
 {
     BamTools::BamAlignment alignment;
     alignment.Name = name;
@@ -40,17 +41,17 @@ static BamTools::BamAlignment make_alignment(
                 static_cast<uint32_t>(sequence.size())));
     }
 
-    alignment.AddTag("RG", "Z", std::string("rg1"));
+    alignment.AddTag("RG", "Z", readGroup);
     return alignment;
 }
 
 int main(int argc, char** argv)
 {
-    if (argc < 2 || argc > 7) {
+    if (argc < 2 || argc > 8) {
         std::cerr << "Usage: " << argv[0]
                   << " OUTPUT.bam [READS_PER_REFERENCE [READ_LENGTH "
                   << "[NO_COORDINATE_READS [WINDOW_BOUNDARY_READS "
-                  << "[PRIMARY_REFERENCE_STYLE]]]]]\n";
+                  << "[PRIMARY_REFERENCE_STYLE [READ_GROUPS]]]]]]\n";
         return 2;
     }
 
@@ -63,13 +64,15 @@ int main(int argc, char** argv)
         argc >= 6 ? std::atoi(argv[5]) != 0 : false;
     const int primaryReferenceStyle =
         argc >= 7 ? std::atoi(argv[6]) : 0;
+    const int readGroupCount = argc >= 8 ? std::atoi(argv[7]) : 1;
     if (readsPerReference < 1 || readLength < 100 || readLength > 100000 ||
         requestedNoCoordinateRecords < 0 || primaryReferenceStyle < 0 ||
-        primaryReferenceStyle > 2) {
+        primaryReferenceStyle > 2 || readGroupCount < 1 ||
+        readGroupCount > 64) {
         std::cerr << "READS_PER_REFERENCE must be positive and READ_LENGTH "
                   << "must be between 100 and 100000; NO_COORDINATE_READS "
                   << "must not be negative; PRIMARY_REFERENCE_STYLE must "
-                  << "be 0, 1, or 2\n";
+                  << "be 0, 1, or 2; READ_GROUPS must be from 1 to 64\n";
         return 2;
     }
 
@@ -121,7 +124,10 @@ int main(int argc, char** argv)
         header << "@SQ\tSN:" << name
                << "\tLN:" << currentReferenceLength << "\n";
     }
-    header << "@RG\tID:rg1\tSM:sample\tLB:library\n";
+    for (int readGroup = 1; readGroup <= readGroupCount; ++readGroup) {
+        header << "@RG\tID:rg" << readGroup
+               << "\tSM:sample\tLB:library\n";
+    }
 
     BamTools::BamWriter writer;
     if (!writer.Open(bamPath, header.str(), references)) {
@@ -155,7 +161,8 @@ int main(int argc, char** argv)
                 100 + i * recordSpacing,
                 i == 0 ? telomeric : ordinary,
                 true,
-                refID == 0 && i == 1);
+                refID == 0 && i == 1,
+                "rg" + std::to_string(i % readGroupCount + 1));
 
             if (i % 2 == 1) {
                 alignment.SetIsReverseStrand(true);

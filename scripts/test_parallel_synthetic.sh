@@ -400,10 +400,12 @@ fi
 merged_tsv="$test_dir/merged-result.tsv"
 merged_log="$test_dir/merged-result.log"
 merged_stdout="$test_dir/merged-result.stdout"
+merged_bam="$test_dir/merged-read-groups.bam"
+"$fixture_generator" "$merged_bam" 20 100 8 0 0 2
 if ! "$new_telseq" -m \
     --output-tsv "$merged_tsv" \
     --output-log "$merged_log" \
-    "$bam" >"$merged_stdout" 2>"$test_dir/merged-result.stderr"; then
+    "$merged_bam" >"$merged_stdout" 2>"$test_dir/merged-result.stderr"; then
     echo "FAIL[86]: merged read-group artifact execution failed" >&2
     exit 86
 fi

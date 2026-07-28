@@ -67,8 +67,8 @@ that:
   default parallel log contains reference-profile rows; the default run also
   streams the complete log and result table to stdout around its
   start/completion messages, `-m` retains regular rows and appends one merged
-  row in both the TSV file and stdout, and direct TSV streams contain no log
-  or status text; and
+  row for a dedicated two-read-group fixture in both the TSV file and stdout,
+  and direct TSV streams contain no log or status text; and
 - the output contains `Total=1130`, `Mapped=1120`, and `Duplicates=3`.
 
 The fixture contains 1,129 physical records. The expected `Total` of 1,130
