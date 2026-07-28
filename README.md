@@ -18,14 +18,14 @@ threshold used for each result row.
 The easiest installation is the released Linux AMD64 image:
 
 ```bash
-docker pull ghcr.io/michtrofimov/telseq-parallel:0.3.3
+docker pull ghcr.io/michtrofimov/telseq-parallel:0.4.0
 ```
 
 Check the installed version:
 
 ```bash
 docker run --rm \
-    ghcr.io/michtrofimov/telseq-parallel:0.3.3 \
+    ghcr.io/michtrofimov/telseq-parallel:0.4.0 \
     --version
 ```
 
@@ -382,7 +382,7 @@ docker run --rm \
     -v /path/to/bam-directory:/data:ro \
     -v "$PWD:/output" \
     -w /output \
-    ghcr.io/michtrofimov/telseq-parallel:0.3.3 \
+    ghcr.io/michtrofimov/telseq-parallel:0.4.0 \
     -t 22 -r 151 /data/sample.bam
 ```
 
@@ -397,7 +397,7 @@ To process several BAMs from the mounted directory:
 docker run --rm \
     -v /path/to/bam-directory:/data:ro \
     -v "$PWD:/output" \
-    ghcr.io/michtrofimov/telseq-parallel:0.3.3 \
+    ghcr.io/michtrofimov/telseq-parallel:0.4.0 \
     -t 22 -r 151 \
     --output-tsv /output/results.telseq.tsv \
     --output-log /output/results.telseq.log \
@@ -417,7 +417,7 @@ several thread counts, use the Docker benchmark wrapper documented in
 ```bash
 scripts/compare_and_benchmark_docker.sh \
     --reference-output stock-result.tsv \
-    ghcr.io/michtrofimov/telseq-parallel:0.3.3 \
+    ghcr.io/michtrofimov/telseq-parallel:0.4.0 \
     sample.bam \
     4 8 22 44 \
     -- -r 151

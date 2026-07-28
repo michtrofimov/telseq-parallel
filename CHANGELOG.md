@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.4.0 - 2026-07-28
+
 ### Changed
 
 - file-output runs report concise start and completion messages, including the
