@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+### Changed
+
+- file-output runs report concise start and completion messages, including the
+  result TSV and profile-log paths, to standard output; direct TSV streaming to
+  `/dev/stdout` remains byte-clean.
+
 ## 0.3.3 - 2026-07-28
 
 ### Added

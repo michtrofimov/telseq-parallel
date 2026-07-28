@@ -328,8 +328,19 @@ if [ ! -s "$default_tsv" ] || [ ! -s "$default_log" ]; then
     echo "FAIL: default .telseq.tsv or .telseq.log artifact is missing" >&2
     exit 75
 fi
-if [ -s "$default_console_stdout" ] || [ -s "$default_console_stderr" ]; then
-    echo "FAIL: default artifact execution unexpectedly wrote to the console" >&2
+if [ -s "$default_console_stderr" ]; then
+    echo "FAIL: default artifact execution unexpectedly wrote to stderr" >&2
+    exit 76
+fi
+if [ "$(grep -c '^TelSeq ' "$default_console_stdout")" -ne 2 ] ||
+   ! grep -Fq \
+    "TelSeq started: result TSV parallel-fixture.telseq.tsv; profile log parallel-fixture.telseq.log" \
+    "$default_console_stdout" ||
+   ! grep -Fq \
+    "TelSeq completed: result TSV parallel-fixture.telseq.tsv; profile log parallel-fixture.telseq.log" \
+    "$default_console_stdout"; then
+    echo "FAIL: default artifact execution did not report its start and completion paths" >&2
+    sed -n '1,20p' "$default_console_stdout" >&2
     exit 76
 fi
 if ! grep -q '^\[reference-profile\]' "$default_log"; then

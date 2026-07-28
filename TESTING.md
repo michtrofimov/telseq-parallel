@@ -64,7 +64,9 @@ that:
   integer to the final `K` column; and
 - a single BAM creates `<basename>.telseq.tsv` and `<basename>.telseq.log` by
   default, explicit artifact paths work, `-o` remains a TSV alias, and the
-  default parallel log contains reference-profile rows; and
+  default parallel log contains reference-profile rows; the default run also
+  reports its artifact paths at start and completion without writing status
+  text into direct TSV streams; and
 - the output contains `Total=1130`, `Mapped=1120`, and `Duplicates=3`.
 
 The fixture contains 1,129 physical records. The expected `Total` of 1,130

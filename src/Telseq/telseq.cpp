@@ -1933,6 +1933,9 @@ int main(int argc, char** argv)
             }
             return EXIT_FAILURE;
         }
+
+        std::cout << "TelSeq started: result TSV " << opt::outputfile
+                  << "; profile log " << opt::outputLog << std::endl;
     }
 
     int status = EXIT_FAILURE;
@@ -1950,6 +1953,9 @@ int main(int argc, char** argv)
     }
     if(status != 0){
         std::cerr << "TelSeq failed; see log: " << opt::outputLog << "\n";
+    }else if(opt::outputfile != "/dev/stdout"){
+        std::cout << "TelSeq completed: result TSV " << opt::outputfile
+                  << "; profile log " << opt::outputLog << std::endl;
     }
     return status;
 }
