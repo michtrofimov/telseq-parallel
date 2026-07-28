@@ -402,11 +402,11 @@ merged_log="$test_dir/merged-result.log"
 merged_stdout="$test_dir/merged-result.stdout"
 merged_bam="$test_dir/merged-read-groups.bam"
 "$fixture_generator" "$merged_bam" 20 100 8 0 0 2
-if ! "$new_telseq" -m \
+if ! "$new_telseq" \
     --output-tsv "$merged_tsv" \
     --output-log "$merged_log" \
     "$merged_bam" >"$merged_stdout" 2>"$test_dir/merged-result.stderr"; then
-    echo "FAIL[86]: merged read-group artifact execution failed" >&2
+    echo "FAIL[86]: automatic merged read-group artifact execution failed" >&2
     exit 86
 fi
 if ! awk -F '\t' '
@@ -414,12 +414,26 @@ if ! awk -F '\t' '
     NR > 1 && NF > 1 { regular += 1 }
     END { if (merged != 1 || regular < 2) exit 1 }
 ' "$merged_tsv"; then
-    echo "FAIL: -m did not retain regular rows and append one merged row" >&2
+    echo "FAIL: default output did not retain regular rows and append one merged row" >&2
     exit 87
 fi
 if ! contains_line_subsequence "$merged_tsv" "$merged_stdout"; then
     echo "FAIL: merged read-group TSV was not also written to stdout" >&2
     exit 88
+fi
+
+merged_compat_tsv="$test_dir/merged-compat-result.tsv"
+if ! "$new_telseq" -m \
+    --output-tsv "$merged_compat_tsv" \
+    --output-log "$test_dir/merged-compat-result.log" \
+    "$merged_bam" >"$test_dir/merged-compat-result.stdout" \
+    2>"$test_dir/merged-compat-result.stderr"; then
+    echo "FAIL[89]: inherited -m compatibility flag failed" >&2
+    exit 89
+fi
+if ! cmp -s "$merged_tsv" "$merged_compat_tsv"; then
+    echo "FAIL: inherited -m flag changed automatic merged output" >&2
+    exit 89
 fi
 
 legacy_tsv="$test_dir/legacy-o-result.tsv"

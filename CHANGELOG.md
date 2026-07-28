@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+## 0.5.1 - 2026-07-28
+
+### Changed
+
+- BAMs with more than one read group append the merged weighted-average row by
+  default while retaining every regular read-group row;
+- `-m` remains accepted for command-line compatibility and produces the same
+  output as the new default behavior.
+
 ## 0.5.0 - 2026-07-28
 
 ### Changed
