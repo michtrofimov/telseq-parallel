@@ -33,6 +33,21 @@ results_dir="$test_dir/results"
 
 "$fixture_generator" "$bam"
 
+new_output_args=(--output-tsv /dev/stdout --output-log /dev/stderr)
+stock_output_args=()
+if "$stock_telseq" --help 2>/dev/null |
+   grep -q -- '--output-tsv'; then
+    stock_output_args=(--output-tsv /dev/stdout --output-log /dev/stderr)
+fi
+
+run_new_telseq() {
+    "$new_telseq" "${new_output_args[@]}" "$@"
+}
+
+run_stock_telseq() {
+    "$stock_telseq" "${stock_output_args[@]}" "$@"
+}
+
 assert_k_threshold() {
     label=$1
     expected_log=$2
@@ -41,7 +56,8 @@ assert_k_threshold() {
 
     stdout_file="$test_dir/k-$label.stdout"
     stderr_file="$test_dir/k-$label.stderr"
-    if ! "$new_telseq" "$@" "$bam" >"$stdout_file" 2>"$stderr_file"; then
+    if ! run_new_telseq "$@" "$bam" \
+        >"$stdout_file" 2>"$stderr_file"; then
         echo "FAIL: k-threshold case $label did not run" >&2
         sed -n '1,120p' "$stderr_file" >&2
         exit 69
@@ -105,7 +121,7 @@ assert_invalid_k() {
     value=$2
     stderr_file="$test_dir/k-invalid-$label.stderr"
 
-    if "$new_telseq" -k "$value" "$bam" \
+    if run_new_telseq -k "$value" "$bam" \
         >"$test_dir/k-invalid-$label.stdout" \
         2>"$stderr_file"; then
         echo "FAIL: invalid k value $value was accepted" >&2
@@ -235,15 +251,15 @@ if ! grep -Fqx \
     exit 14
 fi
 
-if grep -q '^\[reference-profile\]' \
+if ! grep -q '^\[reference-profile\]' \
     "$results_dir/threads-22.stderr"; then
-    echo "FAIL: reference profiling was enabled by default" >&2
+    echo "FAIL: reference profiling was not enabled by default" >&2
     exit 24
 fi
 
 profile_stdout="$test_dir/profile.stdout"
 profile_stderr="$test_dir/profile.stderr"
-if ! "$new_telseq" --profile-references -t 22 "$bam" \
+if ! run_new_telseq --profile-references -t 22 "$bam" \
     >"$profile_stdout" \
     2>"$profile_stderr"; then
     echo "FAIL[25]: profiled parallel execution failed" >&2
@@ -293,6 +309,81 @@ if ! awk -F '\t' '
     exit 27
 fi
 
+# Output artifacts are now the default interface. A single BAM derives both
+# names from its basename in the current working directory, while explicit
+# paths and the inherited -o alias select the same TSV writer.
+default_tsv="$test_dir/parallel-fixture.telseq.tsv"
+default_log="$test_dir/parallel-fixture.telseq.log"
+default_console_stdout="$test_dir/default-artifacts.stdout"
+default_console_stderr="$test_dir/default-artifacts.stderr"
+if ! (cd "$test_dir" && "$new_telseq" -t 22 "$bam" \
+    >"$default_console_stdout" 2>"$default_console_stderr"); then
+    echo "FAIL[74]: default output-artifact execution failed" >&2
+    sed -n '1,200p' "$default_console_stderr" >&2
+    exit 74
+fi
+if [ ! -s "$default_tsv" ] || [ ! -s "$default_log" ]; then
+    echo "FAIL: default .telseq.tsv or .telseq.log artifact is missing" >&2
+    exit 75
+fi
+if [ -s "$default_console_stdout" ] || [ -s "$default_console_stderr" ]; then
+    echo "FAIL: default artifact execution unexpectedly wrote to the console" >&2
+    exit 76
+fi
+if ! grep -q '^\[reference-profile\]' "$default_log"; then
+    echo "FAIL: default log does not contain reference-profile rows" >&2
+    exit 77
+fi
+if ! grep -q '^\[timer - scan BAM\]' "$default_log"; then
+    echo "FAIL: default log does not contain the scan timer" >&2
+    exit 78
+fi
+
+explicit_tsv="$test_dir/explicit-result.tsv"
+explicit_log="$test_dir/explicit-profile.log"
+if ! "$new_telseq" \
+    --output-tsv "$explicit_tsv" \
+    --output-log "$explicit_log" \
+    -t 22 "$bam" \
+    >"$test_dir/explicit-artifacts.stdout" \
+    2>"$test_dir/explicit-artifacts.stderr"; then
+    echo "FAIL[79]: explicit output-artifact execution failed" >&2
+    exit 79
+fi
+if ! cmp -s "$default_tsv" "$explicit_tsv"; then
+    echo "FAIL: explicit --output-tsv changed the result table" >&2
+    exit 80
+fi
+if ! grep -q '^\[reference-profile\]' "$explicit_log"; then
+    echo "FAIL: explicit --output-log does not contain reference profiles" >&2
+    exit 81
+fi
+
+legacy_tsv="$test_dir/legacy-o-result.tsv"
+legacy_log="$test_dir/legacy-o-result.log"
+if ! "$new_telseq" -o "$legacy_tsv" --output-log "$legacy_log" \
+    "$bam" >"$test_dir/legacy-o.stdout" 2>"$test_dir/legacy-o.stderr"; then
+    echo "FAIL[82]: inherited -o output alias failed" >&2
+    exit 82
+fi
+if [ ! -s "$legacy_tsv" ] || [ ! -s "$legacy_log" ]; then
+    echo "FAIL: inherited -o did not create both requested artifacts" >&2
+    exit 83
+fi
+
+if "$new_telseq" "$bam" "$bam" \
+    >"$test_dir/multiple-default.stdout" \
+    2>"$test_dir/multiple-default.stderr"; then
+    echo "FAIL: multiple BAMs were accepted without explicit artifact paths" >&2
+    exit 84
+fi
+if ! grep -Fq \
+    "Multiple BAM inputs require both --output-tsv and --output-log" \
+    "$test_dir/multiple-default.stderr"; then
+    echo "FAIL: multiple-BAM artifact error is not actionable" >&2
+    exit 85
+fi
+
 # Split one long synthetic reference into three windows. Records ending at,
 # spanning, starting at, and starting immediately after a boundary prove that
 # overlap queries are reduced to exact start-coordinate ownership.
@@ -302,13 +393,13 @@ window_parallel_stdout="$test_dir/window-boundary-parallel.stdout"
 window_parallel_stderr="$test_dir/window-boundary-parallel.stderr"
 "$fixture_generator" "$window_bam" 20 100 8 1
 
-if ! "$stock_telseq" "$window_bam" \
+if ! run_stock_telseq "$window_bam" \
     >"$window_stock_stdout" \
     2>"$test_dir/window-boundary-stock.stderr"; then
     echo "FAIL[28]: stock TelSeq failed on window-boundary fixture" >&2
     exit 28
 fi
-if ! "$new_telseq" --profile-references -t 22 "$window_bam" \
+if ! run_new_telseq --profile-references -t 22 "$window_bam" \
     >"$window_parallel_stdout" \
     2>"$window_parallel_stderr"; then
     echo "FAIL[29]: windowed parallel execution failed" >&2
@@ -366,13 +457,13 @@ primary_parallel_stdout="$test_dir/primary-parallel.stdout"
 primary_parallel_stderr="$test_dir/primary-parallel.stderr"
 "$fixture_generator" "$primary_bam" 20 100 8 0 1
 
-if ! "$new_telseq" --primary-chromosomes-only -t 1 "$primary_bam" \
+if ! run_new_telseq --primary-chromosomes-only -t 1 "$primary_bam" \
     >"$primary_serial_stdout" \
     2>"$test_dir/primary-serial.stderr"; then
     echo "FAIL[60]: serial primary-chromosome scan failed" >&2
     exit 60
 fi
-if ! "$new_telseq" --primary-chromosomes-only --profile-references \
+if ! run_new_telseq --primary-chromosomes-only --profile-references \
     -t 22 "$primary_bam" \
     >"$primary_parallel_stdout" \
     2>"$primary_parallel_stderr"; then
@@ -429,7 +520,7 @@ fi
 prefixed_primary_bam="$test_dir/chr-primary-reference-fixture.bam"
 prefixed_primary_stdout="$test_dir/chr-primary-parallel.stdout"
 "$fixture_generator" "$prefixed_primary_bam" 20 100 8 0 2
-if ! "$new_telseq" --primary-chromosomes-only -t 22 \
+if ! run_new_telseq --primary-chromosomes-only -t 22 \
     "$prefixed_primary_bam" \
     >"$prefixed_primary_stdout" \
     2>"$test_dir/chr-primary-parallel.stderr"; then
@@ -462,13 +553,13 @@ fi
 no_tail_bam="$test_dir/no-tail-fixture.bam"
 "$fixture_generator" "$no_tail_bam" 20 100 0
 
-if ! "$stock_telseq" "$no_tail_bam" \
+if ! run_stock_telseq "$no_tail_bam" \
     >"$test_dir/no-tail-stock.stdout" \
     2>"$test_dir/no-tail-stock.stderr"; then
     echo "FAIL[16]: stock TelSeq failed on no-tail fixture" >&2
     exit 16
 fi
-if ! "$new_telseq" -t 22 "$no_tail_bam" \
+if ! run_new_telseq -t 22 "$no_tail_bam" \
     >"$test_dir/no-tail-parallel.stdout" \
     2>"$test_dir/no-tail-parallel.stderr"; then
     echo "FAIL[17]: parallel TelSeq failed on no-tail fixture" >&2
@@ -498,7 +589,8 @@ echo "PASS: synthetic parallel test completed"
 echo "Expected legacy counts: Total=1130 Mapped=1120 Duplicates=3"
 echo "Fast tail access: 8 indexed records fetched; 0 full sequential scans"
 echo "No-tail fallback: 20 final-reference records fetched; stock output matched"
-echo "Reference profile: 64 timed tasks with index estimates; standard output unchanged"
+echo "Reference profile: enabled by default with 64 timed tasks and index estimates"
+echo "Output artifacts: default basenames, explicit paths, and inherited -o alias verified"
 echo "Window ownership: boundary-spanning records counted exactly once"
 echo "Primary filter: 1-22/X/Y and chr-prefixed aliases only; serial/parallel matched"
 echo "Automatic k: integer 40% rule, explicit override, stdout K column, and invalid-input rejection verified"

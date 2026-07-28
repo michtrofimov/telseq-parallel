@@ -71,7 +71,7 @@ for argument in "${telseq_args[@]}"; do
             echo "Error: the benchmark controls the input BAM; do not pass $argument" >&2
             exit 2
             ;;
-        -o|-o*|--output-dir|--output-dir=*)
+        -o|-o*|--output-dir|--output-dir=*|--output-tsv|--output-tsv=*|--output-log|--output-log=*)
             echo "Error: the benchmark captures stdout; do not pass $argument" >&2
             exit 2
             ;;
@@ -108,6 +108,14 @@ if [ ! -x "$new_telseq" ]; then
     echo "Error: new TelSeq is not executable: $new_telseq" >&2
     exit 2
 fi
+
+stock_output_args=()
+if [ "$reference_mode" = "executable" ] &&
+   "$stock_telseq" --help 2>/dev/null |
+   grep -q -- '--output-tsv'; then
+    stock_output_args=(--output-tsv /dev/stdout --output-log /dev/stderr)
+fi
+new_output_args=(--output-tsv /dev/stdout --output-log /dev/stderr)
 
 case "$bam" in
     *.bam)
@@ -205,7 +213,8 @@ if [ "$reference_mode" = "file" ]; then
     echo "Using existing stock output: $reference_output"
 else
     echo "Running stock TelSeq..."
-    if ! run_timed stock "$stock_telseq" "${telseq_args[@]}" "$bam"; then
+    if ! run_timed stock "$stock_telseq" \
+        "${stock_output_args[@]}" "${telseq_args[@]}" "$bam"; then
         echo "Error: stock TelSeq failed. See $output_dir/stock.stderr" >&2
         echo "Results: $output_dir"
         exit 1
@@ -220,7 +229,8 @@ for thread_count in "${thread_grid[@]}"; do
     label="threads-${thread_count}"
     echo "Running new TelSeq with -t $thread_count..."
     if ! run_timed "$label" "$new_telseq" \
-        "${telseq_args[@]}" -t "$thread_count" "$bam"; then
+        "${new_output_args[@]}" "${telseq_args[@]}" \
+        -t "$thread_count" "$bam"; then
         echo "FAIL: -t $thread_count exited unsuccessfully; see ${label}.stderr" >&2
         had_failure=1
         if [ "$stop_on_mismatch" != "0" ]; then

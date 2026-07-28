@@ -62,6 +62,9 @@ that:
   reads, adapts to custom motif length, preserves an explicit integer
   override, rejects fractional or suffixed values, and writes the selected
   integer to the final `K` column; and
+- a single BAM creates `<basename>.telseq.tsv` and `<basename>.telseq.log` by
+  default, explicit artifact paths work, `-o` remains a TSV alias, and the
+  default parallel log contains reference-profile rows; and
 - the output contains `Total=1130`, `Mapped=1120`, and `Duplicates=3`.
 
 The fixture contains 1,129 physical records. The expected `Total` of 1,130
@@ -160,7 +163,9 @@ arguments. Do not pass the following options after `--`:
 
 - `-t` / `--threads`, because the wrapper controls the thread grid;
 - `-f` / `--bamlist`, because the wrapper controls the input BAM; or
-- `-o` / `--output-dir`, because the wrapper captures stdout.
+- `-o` / `--output-dir` / `--output-tsv`, because the wrapper controls the
+  captured result path; or
+- `--output-log`, because the wrapper controls the captured progress log.
 
 ### Benchmark the Docker image
 
@@ -170,7 +175,7 @@ stock TelSeq output without installing the new executable on the host:
 ```bash
 scripts/compare_and_benchmark_docker.sh \
     --reference-output /path/to/stock-result.tsv \
-    ghcr.io/michtrofimov/telseq-parallel:0.3.2 \
+    ghcr.io/michtrofimov/telseq-parallel:0.3.3 \
     /path/to/sample.bam \
     4 8 22 44 \
     -- -r 151 -k 7
@@ -278,12 +283,12 @@ must report `full sequential scans: 0`. This retains no-coordinate alignments
 and stock TelSeq's legacy final-record contribution without reading the whole
 BAM a second time.
 
-To inspect whole-reference scheduling, add `--profile-references` to a
-parallel run. Its tab-separated `[reference-profile]` rows are written only to
-stderr and include per-task worker assignment, reference and window metadata,
-the index-derived record estimate, read counts, start/end time offsets, and
-elapsed time. For the Docker benchmark wrapper, pass it after `--` with the
-other TelSeq arguments:
+Every parallel run records tab-separated `[reference-profile]` rows in its log.
+They include per-task worker assignment, reference and window metadata, the
+index-derived record estimate, read counts, start/end time offsets, and elapsed
+time. The benchmark wrappers route the result TSV and log through
+`/dev/stdout` and `/dev/stderr` internally so their established artifact names
+and timing capture remain stable.
 
 ```bash
 scripts/compare_and_benchmark_docker.sh \
@@ -291,10 +296,10 @@ scripts/compare_and_benchmark_docker.sh \
     ghcr.io/michtrofimov/telseq-parallel:master \
     /path/to/sample.bam \
     12 23 46 \
-    -- --profile-references -r 151
+    -- -r 151
 ```
 
-The synthetic compatibility test asserts that profiling emits one well-formed
+The synthetic compatibility test asserts that default profiling emits one well-formed
 row per task, prioritizes a deliberately dense short reference, and does not
 change stdout. Its boundary fixture expands one reference into three windows
 and checks the exact read count owned by each.

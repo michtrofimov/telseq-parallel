@@ -40,7 +40,8 @@ run_timed() {
     stderr="$test_dir/threads-$threads-run-$run.stderr"
 
     start_ns=$(date +%s%N)
-    if ! "$telseq" -t "$threads" -u "$bam" >"$stdout" 2>"$stderr"; then
+    if ! "$telseq" --output-tsv /dev/stdout --output-log /dev/stderr \
+        -t "$threads" -u "$bam" >"$stdout" 2>"$stderr"; then
         echo "FAIL[50]: -t $threads execution failed" >&2
         sed -n '1,200p' "$stderr" >&2
         return 50

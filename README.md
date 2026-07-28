@@ -18,14 +18,14 @@ threshold used for each result row.
 The easiest installation is the released Linux AMD64 image:
 
 ```bash
-docker pull ghcr.io/michtrofimov/telseq-parallel:0.3.2
+docker pull ghcr.io/michtrofimov/telseq-parallel:0.3.3
 ```
 
 Check the installed version:
 
 ```bash
 docker run --rm \
-    ghcr.io/michtrofimov/telseq-parallel:0.3.2 \
+    ghcr.io/michtrofimov/telseq-parallel:0.3.3 \
     --version
 ```
 
@@ -143,14 +143,18 @@ in the output, so it must be the same when comparing runs.
 Run the original sequential path:
 
 ```bash
-telseq -r 151 sample.bam > sample.telseq.tsv
+telseq -r 151 sample.bam
 ```
 
 Scan the same BAM with 22 threads:
 
 ```bash
-telseq -t 22 -r 151 sample.bam > sample.telseq.tsv
+telseq -t 22 -r 151 sample.bam
 ```
+
+Both commands create `sample.telseq.tsv` and `sample.telseq.log` in the
+current working directory. Parallel logs include the reference-window profile
+by default.
 
 For `-t > 1`, one requested thread is reserved for a short HTSlib compatibility
 scan and the remaining threads consume indexed reference-window tasks
@@ -181,7 +185,10 @@ chromosomes to use multiple workers.
 Paths can be provided as positional arguments:
 
 ```bash
-telseq -t 22 -r 151 sample1.bam sample2.bam > results.tsv
+telseq -t 22 -r 151 \
+    --output-tsv /results/cohort.telseq.tsv \
+    --output-log /results/cohort.telseq.log \
+    sample1.bam sample2.bam
 ```
 
 They can also be stored in a one-column file:
@@ -192,18 +199,25 @@ They can also be stored in a one-column file:
 ```
 
 ```bash
-telseq -t 22 -r 151 -f bamlist.txt > results.tsv
+telseq -t 22 -r 151 \
+    --output-tsv /results/cohort.telseq.tsv \
+    --output-log /results/cohort.telseq.log \
+    -f bamlist.txt
 ```
 
 Or passed on standard input:
 
 ```bash
 printf '%s\n' /data/sample1.bam /data/sample2.bam | \
-    telseq -t 22 -r 151 > results.tsv
+    telseq -t 22 -r 151 \
+        --output-tsv /results/cohort.telseq.tsv \
+        --output-log /results/cohort.telseq.log
 ```
 
 When multiple BAMs are supplied, TelSeq processes them one at a time. The
-thread count applies to the BAM currently being scanned.
+thread count applies to the BAM currently being scanned. Both output paths are
+required for multi-BAM, bamlist, and piped-input runs because no single BAM
+basename is an unambiguous default.
 
 ### Restrict analysis to human primary chromosomes
 
@@ -212,8 +226,8 @@ contribute to the result:
 
 ```bash
 telseq -t 23 --primary-chromosomes-only -r 151 sample.bam \
-    > sample.primary.telseq.tsv \
-    2> sample.primary.telseq.log
+    --output-tsv sample.primary.telseq.tsv \
+    --output-log sample.primary.telseq.log
 ```
 
 Accepted names are exactly `1`–`22`, `X`, `Y`, `chr1`–`chr22`, `chrX`, and
@@ -230,20 +244,27 @@ and stock-compatible.
 
 ### Output destination and logs
 
-Results are written to standard output and progress messages to standard
-error. Keep them separate when redirecting:
+For one BAM, TelSeq Parallel derives both artifact names from the BAM basename
+and creates them in the current working directory:
 
-```bash
-telseq -t 22 -r 151 sample.bam \
-    > sample.telseq.tsv \
-    2> sample.telseq.log
+```text
+/data/sample.bam -> ./sample.telseq.tsv
+                 -> ./sample.telseq.log
 ```
 
-`-o` can be used instead of stdout redirection:
+Use explicit paths when another directory or name is required. Parent
+directories must already exist:
 
 ```bash
-telseq -t 22 -r 151 -o sample.telseq.tsv sample.bam
+telseq -t 22 -r 151 \
+    --output-tsv /results/sample.tsv \
+    --output-log /results/sample.log \
+    /data/sample.bam
 ```
+
+`-o` and the inherited `--output-dir` name remain aliases for
+`--output-tsv`. Existing files at the selected paths are replaced. The TSV
+and log paths must differ and may not name an input BAM.
 
 ## Parameters
 
@@ -252,11 +273,13 @@ telseq -t 22 -r 151 -o sample.telseq.tsv sample.bam
 | `-t INT`, `--threads=INT` | `1` | Threads requested for one BAM. Valid range: 1–1024. Values greater than 1 require a coordinate-sorted, indexed BAM. |
 | `--reference-window-size INT` | `25000000` | Window size in bases for indexed mapped-reference tasks. Use `0` to restore whole-reference tasks; otherwise valid from 1,000 to 1,000,000,000. |
 | `--primary-chromosomes-only` | off | Analyze only exact human autosomes 1–22 and sex chromosomes X/Y, with an optional `chr` prefix. Excludes all other references and no-coordinate reads. |
-| `--profile-references` | off | With `-t > 1`, write one tab-separated timing record per mapped-reference window task to stderr. |
+| `--profile-references` | on | Compatibility flag retained for existing commands. With `-t > 1`, profiling is always enabled and its tab-separated task rows are written to the output log. |
 | `-r INT` | `100` | Read length in bases. Controls the supported motif-count range and therefore the number of `TEL` columns. |
 | `-k INT` | automatic | Integer minimum number of `TTAGGG` or `CCCTAA` repeats for a read to contribute to the telomeric-read numerator. When omitted, the smallest integer covering at least 40% of the configured read length is used. |
 | `-f FILE`, `--bamlist=FILE` | — | Read BAM paths from a one-column file. Positional BAM arguments are ignored when this is used. |
-| `-o FILE`, `--output-dir=FILE` | stdout | Write the result table to this file. The inherited long-option name says “directory”, but the value is a file path. |
+| `--output-tsv PATH` | `<BAM basename>.telseq.tsv` | Write the result table to this path. The default is created in the current working directory for a single BAM. |
+| `-o PATH`, `--output-dir=PATH` | same as `--output-tsv` | Backward-compatible aliases for the result TSV path. |
+| `--output-log PATH` | `<BAM basename>.telseq.log` | Write progress, diagnostics, timing, and reference-profile rows to this path. |
 | `-H` | off | Suppress the output header. Useful when appending several runs. |
 | `-h` | off | Print only the output header and exit. |
 | `-m` | off | Merge read groups for a sample using the original TelSeq weighted-mean behavior. |
@@ -280,23 +303,20 @@ k = ceil(0.40 * read_length / motif_length)
 For the standard six-base motif this gives `k=7` at `-r 100`, `k=10` at
 `-r 150`, and `k=11` at `-r 151`. An explicit `-k` always takes precedence.
 The effective integer is written to the final `K` column in every result row
-and is also reported in the progress log on stderr.
+and is also reported in the progress log.
 Stock TelSeq always defaults to `k=7`, so comparisons using a read length other
 than 100 must pass the same explicit `-k` to both programs if stock-default
 compatibility is required.
 
 ### Profile mapped-reference tasks
 
-To diagnose scaling limits without changing result stdout, enable the optional
-per-reference profile:
+Parallel runs always record the reference-window profile in the output log:
 
 ```bash
-telseq -t 23 --profile-references -r 151 sample.bam \
-    > sample.telseq.tsv \
-    2> sample.reference-profile.log
+telseq -t 23 -r 151 sample.bam
 ```
 
-Each `[reference-profile]` stderr row reports the scheduler task and worker
+Each `[reference-profile]` log row reports the scheduler task and worker
 IDs, reference ID/name/length, genomic window start/end, the index-derived
 scheduling estimate, records scanned and processed after filters, start and
 end offsets from the parallel scan epoch, and elapsed seconds. Rows are
@@ -329,18 +349,22 @@ There are ten GC columns: `GC0` represents 40–42% GC, `GC1` represents
 42–44%, and so on through `GC9`, which represents 58–60%.
 
 `K` is the final column. Because unmodified stock TelSeq does not emit it, raw
-stdout from the two programs is no longer byte-identical even when every
-inherited value matches. The repository comparison scripts validate that `K`
-is an integer, remove only that column for the stock comparison, and then
-require all inherited output bytes to match. The numbered `0.3.1` image
+result tables from the two programs are no longer byte-identical even when
+every inherited value matches. The repository comparison scripts validate
+that `K` is an integer, remove only that column for the stock comparison, and
+then require all inherited output bytes to match. The numbered `0.3.1` image
 predates this additional column; it is included in version `0.3.2` and later.
 
 Print only the header when preparing a combined result file:
 
 ```bash
 telseq -r 151 -h > combined.tsv
-telseq -t 22 -r 151 -H sample1.bam >> combined.tsv
-telseq -t 22 -r 151 -H sample2.bam >> combined.tsv
+telseq -t 22 -r 151 -H \
+    --output-tsv /dev/stdout --output-log sample1.telseq.log \
+    sample1.bam >> combined.tsv
+telseq -t 22 -r 151 -H \
+    --output-tsv /dev/stdout --output-log sample2.telseq.log \
+    sample2.bam >> combined.tsv
 ```
 
 ## Using the Docker image
@@ -352,24 +376,28 @@ the image name:
 ```bash
 docker run --rm \
     -v /path/to/bam-directory:/data:ro \
-    ghcr.io/michtrofimov/telseq-parallel:0.3.2 \
-    -t 22 -r 151 /data/sample.bam \
-    > sample.telseq.tsv
+    -v "$PWD:/output" \
+    -w /output \
+    ghcr.io/michtrofimov/telseq-parallel:0.3.3 \
+    -t 22 -r 151 /data/sample.bam
 ```
 
-For this example, the host directory should contain either
-`sample.bam.bai` or `sample.bai` alongside `sample.bam`. Shell redirection is
-performed by the host, so `sample.telseq.tsv` is created in the current host
-directory rather than inside the container.
+For this example, the host BAM directory should contain either
+`sample.bam.bai` or `sample.bai` alongside `sample.bam`. The writable `/output`
+mount is the container working directory, so the default `sample.telseq.tsv`
+and `sample.telseq.log` files persist in the current host directory.
 
 To process several BAMs from the mounted directory:
 
 ```bash
 docker run --rm \
     -v /path/to/bam-directory:/data:ro \
-    ghcr.io/michtrofimov/telseq-parallel:0.3.2 \
-    -t 22 -r 151 /data/sample1.bam /data/sample2.bam \
-    > results.tsv
+    -v "$PWD:/output" \
+    ghcr.io/michtrofimov/telseq-parallel:0.3.3 \
+    -t 22 -r 151 \
+    --output-tsv /output/results.telseq.tsv \
+    --output-log /output/results.telseq.log \
+    /data/sample1.bam /data/sample2.bam
 ```
 
 Build a local image from the current checkout with:
@@ -385,7 +413,7 @@ several thread counts, use the Docker benchmark wrapper documented in
 ```bash
 scripts/compare_and_benchmark_docker.sh \
     --reference-output stock-result.tsv \
-    ghcr.io/michtrofimov/telseq-parallel:0.3.2 \
+    ghcr.io/michtrofimov/telseq-parallel:0.3.3 \
     sample.bam \
     4 8 22 44 \
     -- -r 151

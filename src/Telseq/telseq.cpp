@@ -11,6 +11,8 @@
 #include <map>
 #include <atomic>
 #include <chrono>
+#include <cctype>
+#include <cstdio>
 #include <exception>
 #include <iomanip>
 #include <memory>
@@ -54,7 +56,9 @@ static const char *TELSEQ_USAGE_MESSAGE =
 "   -f, --bamlist=STR        a file that contains a list of file paths of BAMs. It should has only one column, \n"
 "                            with each row a BAM file path. -f has higher priority than <in.bam>. When specified, \n"
 "                            <in.bam> are ignored.\n"
-"   -o, --output_dir=STR     output file for results. Ignored when input is from stdin, in which case output will be stdout. \n"
+"   --output-tsv=PATH        result TSV path. default = <BAM basename>.telseq.tsv in the current directory.\n"
+"   --output-log=PATH        progress and reference-profile log path. default = <BAM basename>.telseq.log.\n"
+"   -o, --output-dir=PATH    deprecated alias for --output-tsv.\n"
 "   -H                       remove header line, which is printed by default.\n"
 "   -h                       print the header line only. The text can be used to attach to result files, useful\n"
 "                            when the headers of the result files are suppressed. \n"
@@ -67,7 +71,7 @@ static const char *TELSEQ_USAGE_MESSAGE =
 "                            split long references into windows of this many bases. default = 25000000; 0 disables.\n"
 "   --primary-chromosomes-only\n"
 "                            analyse only human autosomes 1-22 and sex chromosomes X/Y; excludes contigs and no-coordinate reads.\n"
-"   --profile-references     emit per-reference worker timing records to standard error. requires -t > 1.\n"
+"   --profile-references     retained compatibility flag; reference profiling is enabled by default for -t > 1.\n"
 "   -k                       threshold of the amount of TTAGGG/CCCTAA repeats in read for a read to be considered telomeric.\n"
 "                            By default, use the smallest repeat count covering at least 40% of the configured read length.\n"
 "\nTesting functions\n------------\n"
@@ -84,6 +88,9 @@ namespace opt
 {
     static StringVector bamlist;
     static std::string outputfile = "";
+    static std::string outputLog = "";
+    static bool outputTsvExplicit = false;
+    static bool outputLogExplicit = false;
     static std::string exomebedfile = "";
     static std::map< std::string, std::vector<range> > exomebed;
     static bool writerheader = true;
@@ -93,7 +100,7 @@ namespace opt
     static unsigned int threads = 1;
     static int referenceWindowSize = 25000000;
     static bool primaryChromosomesOnly = false;
-    static bool profileReferences = false;
+    static bool profileReferences = true;
     static int tel_k = 0;
     static bool telKExplicit = false;
     static std::string unknown = "UNKNOWN";
@@ -109,12 +116,16 @@ enum {
     OPT_VERSION,
     OPT_PRIMARY_CHROMOSOMES_ONLY,
     OPT_PROFILE_REFERENCES,
-    OPT_REFERENCE_WINDOW_SIZE
+    OPT_REFERENCE_WINDOW_SIZE,
+    OPT_OUTPUT_TSV,
+    OPT_OUTPUT_LOG
 };
 
 static const struct option longopts[] = {
 	{ "bamlist",		optional_argument, NULL, 'f' },
-    { "output-dir",		optional_argument, NULL, 'o' },
+    { "output-dir",		required_argument, NULL, 'o' },
+    { "output-tsv",        required_argument, NULL, OPT_OUTPUT_TSV },
+    { "output-log",        required_argument, NULL, OPT_OUTPUT_LOG },
     { "exomebed",		optional_argument, NULL, 'e' },
     { "threads",            required_argument, NULL, 't' },
     { "reference-window-size", required_argument, NULL, OPT_REFERENCE_WINDOW_SIZE },
@@ -1102,8 +1113,11 @@ int scanBam()
   std::vector< std::map<std::string, ScanResults> > resultlist;
   bool isExome = opt::exomebedfile.size()==0? false: true;
 
-  std::cout << opt::bamlist << "\n";
-  std::cout << opt::bamlist.size() << " BAMs" <<  std::endl;
+  std::ostream& inputSummary = opt::outputfile == "/dev/stdout"
+      ? std::cout
+      : std::cerr;
+  inputSummary << opt::bamlist << "\n";
+  inputSummary << opt::bamlist.size() << " BAMs" << std::endl;
 
   for(std::size_t i=0; i<opt::bamlist.size(); i++) {
 
@@ -1339,7 +1353,9 @@ int scanBam()
     merge_results_by_readgroup(resultlist);
   }
 
-  outputresults(resultlist);
+  if(outputresults(resultlist) != 0){
+    return 1;
+  }
 
   if(isExome){
     printlog(resultlist);
@@ -1359,9 +1375,9 @@ void printlog(std::vector< std::map<std::string, ScanResults> > resultlist){
 
 			std::string rg = it ->first;
 			ScanResults result = it -> second;
-			std::cout << "BAM:" << rg << std::endl;
-			std::cout << "	chr ID unmatched reads: " << result.n_exreadsChrUnmatched << std::endl;
-			std::cout << "	exome reads excluded: " << result.n_exreadsExcluded << std::endl;
+			std::cerr << "BAM:" << rg << std::endl;
+			std::cerr << "	chr ID unmatched reads: " << result.n_exreadsChrUnmatched << std::endl;
+			std::cerr << "	exome reads excluded: " << result.n_exreadsExcluded << std::endl;
 		}
 	}
 
@@ -1411,6 +1427,12 @@ int outputresults(std::vector< std::map<std::string, ScanResults> > resultlist){
 		pWriter = &std::cout;
 	}else{
 		pWriter = createWriter(opt::outputfile);
+		if(!(*pWriter)){
+			std::cerr << "Error: could not open result TSV for writing: "
+			          << opt::outputfile << "\n";
+			delete pWriter;
+			return 1;
+		}
 	}
 
 	if(opt::writerheader){
@@ -1613,7 +1635,29 @@ void parseScanOptions(int argc, char** argv)
             case 'f':
             	arg >> bamlistfile; break;
             case 'o':
-            	arg >> opt::outputfile; break;
+                opt::outputfile = optarg != NULL ? optarg : "";
+                if(opt::outputfile.empty()){
+                    std::cerr << "--output-tsv requires a non-empty path\n";
+                    exit(EXIT_FAILURE);
+                }
+                opt::outputTsvExplicit = true;
+                break;
+            case OPT_OUTPUT_TSV:
+                opt::outputfile = optarg != NULL ? optarg : "";
+                if(opt::outputfile.empty()){
+                    std::cerr << "--output-tsv requires a non-empty path\n";
+                    exit(EXIT_FAILURE);
+                }
+                opt::outputTsvExplicit = true;
+                break;
+            case OPT_OUTPUT_LOG:
+                opt::outputLog = optarg != NULL ? optarg : "";
+                if(opt::outputLog.empty()){
+                    std::cerr << "--output-log requires a non-empty path\n";
+                    exit(EXIT_FAILURE);
+                }
+                opt::outputLogExplicit = true;
+                break;
             case 'H':
             	opt::writerheader=false; break;
             case 'm':
@@ -1687,17 +1731,13 @@ void parseScanOptions(int argc, char** argv)
 
 				break;
             case 'z':
-            	arg >> ScanParameters::PATTERN;
+				arg >> ScanParameters::PATTERN;
 				ScanParameters::PATTERN_REVCOMP = reverseComplement(ScanParameters::PATTERN);
-				std::cerr << "use user specified pattern " <<  ScanParameters::PATTERN << "\n";
-				std::cerr << "reverse complement " <<  ScanParameters::PATTERN_REVCOMP << "\n";
-            	break;
+				break;
             case 'e':
-            	arg >> opt::exomebedfile;
-            	opt::exomebed = readBedAsVector(opt::exomebedfile);
-            	std::cout << "loaded "<< opt::exomebed.size() << " exome regions \n"<< std::endl;
-//            	std::cout << opt::exomebed << "\n";
-            	break;
+				arg >> opt::exomebedfile;
+				opt::exomebed = readBedAsVector(opt::exomebedfile);
+				break;
 
             case OPT_HELP:
                 std::cout << TELSEQ_USAGE_MESSAGE;
@@ -1707,13 +1747,6 @@ void parseScanOptions(int argc, char** argv)
                 exit(EXIT_SUCCESS);
         }
     }
-
-    if(opt::profileReferences && opt::threads == 1){
-        std::cerr << "--profile-references requires -t greater than 1\n";
-        exit(EXIT_FAILURE);
-    }
-
-    update_pattern();
 
     // deal with cases of API usage:
     // telseq a.bam b.bam c.bam ...
@@ -1778,13 +1811,145 @@ void parseScanOptions(int argc, char** argv)
     }
 }
 
+static std::string default_artifact_path(
+    const std::string& bamPath,
+    const std::string& suffix)
+{
+    const std::string::size_type separator = bamPath.find_last_of("/\\");
+    std::string basename = separator == std::string::npos
+        ? bamPath
+        : bamPath.substr(separator + 1);
+    if(basename.size() >= 4){
+        std::string extension = basename.substr(basename.size() - 4);
+        std::transform(
+            extension.begin(),
+            extension.end(),
+            extension.begin(),
+            [](unsigned char character) {
+                return static_cast<char>(std::tolower(character));
+            });
+        if(extension == ".bam"){
+            basename.erase(basename.size() - 4);
+        }
+    }
+    if(basename.empty()){
+        basename = "telseq";
+    }
+    return basename + suffix;
+}
+
+static void configure_artifact_paths()
+{
+    if(opt::bamlist.empty()){
+        std::cerr << PROGRAM_BIN << ": no BAM input was provided\n";
+        exit(EXIT_FAILURE);
+    }
+
+    if(opt::bamlist.size() != 1 &&
+       (!opt::outputTsvExplicit || !opt::outputLogExplicit)){
+        std::cerr << "Multiple BAM inputs require both --output-tsv and "
+                  << "--output-log because no single BAM basename is "
+                  << "unambiguous.\n";
+        exit(EXIT_FAILURE);
+    }
+
+    if(opt::outputfile.empty()){
+        opt::outputfile = default_artifact_path(
+            opt::bamlist.front(), ".telseq.tsv");
+    }
+    if(opt::outputLog.empty()){
+        opt::outputLog = default_artifact_path(
+            opt::bamlist.front(), ".telseq.log");
+    }
+
+    if(opt::outputfile == opt::outputLog){
+        std::cerr << "--output-tsv and --output-log must name different files\n";
+        exit(EXIT_FAILURE);
+    }
+    for(std::size_t index = 0; index < opt::bamlist.size(); ++index){
+        if(opt::outputfile == opt::bamlist[index] ||
+           opt::outputLog == opt::bamlist[index]){
+            std::cerr << "Refusing to overwrite input BAM with an output "
+                      << "artifact: " << opt::bamlist[index] << "\n";
+            exit(EXIT_FAILURE);
+        }
+    }
+}
+
 
 
 int main(int argc, char** argv)
 {
-	Timer* pTimer = new Timer("scan BAM");
 	parseScanOptions(argc, argv);
-    const int status = scanBam();
-    delete pTimer;
+    configure_artifact_paths();
+
+    int savedStderr = -1;
+    if(opt::outputLog != "/dev/stderr"){
+        std::cerr.flush();
+        std::fflush(stderr);
+        savedStderr = dup(STDERR_FILENO);
+        if(savedStderr < 0){
+            std::cerr << "Error: could not preserve standard error before "
+                      << "opening log file\n";
+            return EXIT_FAILURE;
+        }
+        if(std::freopen(opt::outputLog.c_str(), "w", stderr) == NULL){
+            dup2(savedStderr, STDERR_FILENO);
+            close(savedStderr);
+            std::cerr.clear();
+            std::cerr << "Error: could not open log file for writing: "
+                      << opt::outputLog << "\n";
+            return EXIT_FAILURE;
+        }
+        std::cerr.clear();
+    }
+
+    update_pattern();
+    if(ScanParameters::PATTERN != "TTAGGG"){
+        std::cerr << "use user specified pattern "
+                  << ScanParameters::PATTERN << "\n";
+        std::cerr << "reverse complement "
+                  << ScanParameters::PATTERN_REVCOMP << "\n";
+    }
+    if(!opt::exomebedfile.empty()){
+        std::cerr << "loaded " << opt::exomebed.size()
+                  << " exome regions\n";
+    }
+    std::cerr << "[output] result TSV: " << opt::outputfile << "\n";
+    std::cerr << "[output] profile log: " << opt::outputLog << "\n";
+
+    if(opt::outputfile != "/dev/stdout"){
+        std::ofstream outputProbe(
+            opt::outputfile.c_str(), std::ofstream::out | std::ofstream::trunc);
+        if(!outputProbe){
+            std::cerr << "Error: could not open result TSV for writing: "
+                      << opt::outputfile << "\n";
+            if(savedStderr >= 0){
+                std::cerr.flush();
+                std::fflush(stderr);
+                dup2(savedStderr, STDERR_FILENO);
+                close(savedStderr);
+                std::cerr.clear();
+            }
+            return EXIT_FAILURE;
+        }
+    }
+
+    int status = EXIT_FAILURE;
+    {
+        Timer timer("scan BAM");
+        status = scanBam();
+    }
+
+    if(savedStderr >= 0){
+        std::cerr.flush();
+        std::fflush(stderr);
+        dup2(savedStderr, STDERR_FILENO);
+        close(savedStderr);
+        std::cerr.clear();
+    }
+    if(status != 0){
+        std::cerr << "TelSeq failed; see log: " << opt::outputLog << "\n";
+    }
     return status;
 }

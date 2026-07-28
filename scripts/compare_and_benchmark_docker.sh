@@ -59,7 +59,7 @@ for argument in "${telseq_args[@]}"; do
             echo "Error: the benchmark controls the input BAM; do not pass $argument" >&2
             exit 2
             ;;
-        -o|-o*|--output-dir|--output-dir=*)
+        -o|-o*|--output-dir|--output-dir=*|--output-tsv|--output-tsv=*|--output-log|--output-log=*)
             echo "Error: the benchmark captures stdout; do not pass $argument" >&2
             exit 2
             ;;
@@ -141,6 +141,15 @@ if ! container_version=$("${docker_run[@]}" --version 2>&1); then
     echo "Error: could not start $image" >&2
     echo "$container_version" >&2
     exit 2
+fi
+
+container_output_args=()
+if "${docker_run[@]}" --help 2>/dev/null |
+   grep -q -- '--output-tsv'; then
+    container_output_args=(
+        --output-tsv /dev/stdout
+        --output-log /dev/stderr
+    )
 fi
 
 timestamp=$(date +%Y%m%d-%H%M%S)
@@ -236,7 +245,8 @@ for thread_count in "${thread_grid[@]}"; do
     label="threads-${thread_count}"
     echo "Running $image with -t $thread_count..."
     if ! run_timed "$label" "${docker_run[@]}" \
-        "${telseq_args[@]}" -t "$thread_count" "$container_bam"; then
+        "${container_output_args[@]}" "${telseq_args[@]}" \
+        -t "$thread_count" "$container_bam"; then
         echo "FAIL: -t $thread_count exited unsuccessfully; see ${label}.stderr" >&2
         had_failure=1
         if [ "$stop_on_mismatch" != "0" ]; then

@@ -2,6 +2,33 @@
 
 ## Unreleased
 
+## 0.3.3 - 2026-07-28
+
+### Added
+
+- `--output-tsv` as a descriptive alias for the inherited `-o` and
+  `--output-dir` result-file option;
+- `--output-log` for writing progress, diagnostics, timing, and mapped-reference
+  profile records to a dedicated log file;
+- single-BAM runs derive `<BAM basename>.telseq.tsv` and
+  `<BAM basename>.telseq.log` in the current working directory when paths are
+  not supplied.
+
+### Changed
+
+- mapped-reference profiling is enabled by default for every parallel run;
+- multi-BAM, bamlist, and piped-input runs require explicit TSV and log paths
+  because they do not have one unambiguous BAM basename;
+- benchmark and synthetic-test helpers explicitly route the new artifact
+  destinations through standard output and error when capture is required.
+
+### Compatibility
+
+- `-o`, `--output-dir`, and the explicit `--profile-references` flag remain
+  accepted;
+- one-BAM runs now create result and log artifacts instead of using standard
+  output and error as their primary destinations.
+
 ## 0.3.2 - 2026-07-23
 
 ### Added
