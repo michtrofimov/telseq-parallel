@@ -60,15 +60,15 @@ static const char *TELSEQ_USAGE_MESSAGE =
 "   -f, --bamlist=STR        a file that contains a list of file paths of BAMs. It should has only one column, \n"
 "                            with each row a BAM file path. -f has higher priority than <in.bam>. When specified, \n"
 "                            <in.bam> are ignored.\n"
-"   --output-tsv=PATH        result TSV path. default = <BAM basename>.telseq.tsv in the current directory.\n"
+"   --output-tsv=PATH        result TSV path; results are also printed to stdout.\n"
+"                            default = <BAM basename>.telseq.tsv in the current directory.\n"
 "   --output-log=PATH        progress and reference-profile log path. default = <BAM basename>.telseq.log;\n"
 "                            file-output runs also stream the log to stdout in real time.\n"
 "   -o, --output-dir=PATH    deprecated alias for --output-tsv.\n"
 "   -H                       remove header line, which is printed by default.\n"
 "   -h                       print the header line only. The text can be used to attach to result files, useful\n"
 "                            when the headers of the result files are suppressed. \n"
-"   -m                       merge read groups by taking a weighted average across read groups of a sample, weighted by \n"
-"                            the total number of reads in read group. Default is to output each readgroup separately.\n"
+"   -m                       append a merged weighted-average row across read groups while retaining each regular row.\n"
 "   -u                       ignore read groups. Treat all reads in BAM as if they were from a same read group.\n"
 "   -t, --threads=INT        number of threads for one coordinate-sorted, indexed BAM. default = 1.\n"
 "                            Values greater than 1 reserve one compatibility scanner unless strict primary filtering is enabled.\n"
@@ -191,6 +191,7 @@ struct ReferenceProfile
 typedef std::chrono::steady_clock ReferenceProfileClock;
 
 static std::mutex parallelLogMutex;
+static std::mutex stdoutWriteMutex;
 
 struct SamFileDeleter
 {
@@ -1426,19 +1427,8 @@ void printout(std::string rg, ScanResults result, std::ostream* pWriter){
 
 int outputresults(std::vector< std::map<std::string, ScanResults> > resultlist){
 
-	std::ostream* pWriter;
-	bool tostdout = opt::outputfile.empty() ? true:false;
-	if(tostdout){
-		pWriter = &std::cout;
-	}else{
-		pWriter = createWriter(opt::outputfile);
-		if(!(*pWriter)){
-			std::cerr << "Error: could not open result TSV for writing: "
-			          << opt::outputfile << "\n";
-			delete pWriter;
-			return 1;
-		}
-	}
+	std::ostringstream resultBuffer;
+	std::ostream* pWriter = &resultBuffer;
 
 	if(opt::writerheader){
 		Headers hd;
@@ -1448,12 +1438,11 @@ int outputresults(std::vector< std::map<std::string, ScanResults> > resultlist){
 		*pWriter << "\n";
 	}
 
-	ScanResults mergedrs;
-	std::string grpnames = "";
-
 	for(size_t i=0; i < resultlist.size();++i){
 
 		std::map<std::string, ScanResults> resultmap = resultlist[i];
+		ScanResults mergedrs;
+		std::string grpnames = "";
 
 		// if merge read groups, take weighted average for all measures
 		bool domg = opt::mergerg && resultmap.size() > 1? true:false;
@@ -1483,10 +1472,8 @@ int outputresults(std::vector< std::map<std::string, ScanResults> > resultlist){
 				for (std::size_t k = 0, max = result.gccounts.size(); k != max; ++k){
 					mergedrs.gccounts[k] += result.gccounts[k]* result.numTotal;
 				}
-				continue;
-			}else{
-				printout(rg, result, pWriter);
 			}
+			printout(rg, result, pWriter);
 		}
 
 		//in this case calculate weighted average
@@ -1509,8 +1496,38 @@ int outputresults(std::vector< std::map<std::string, ScanResults> > resultlist){
 		};
 	}
 
-	if(!tostdout){
-		delete pWriter;
+	const std::string resultText = resultBuffer.str();
+	if(opt::outputfile != "/dev/stdout"){
+		std::ostream* fileWriter = createWriter(opt::outputfile);
+		if(!(*fileWriter)){
+			std::cerr << "Error: could not open result TSV for writing: "
+			          << opt::outputfile << "\n";
+			delete fileWriter;
+			return 1;
+		}
+		*fileWriter << resultText;
+		fileWriter->flush();
+		if(!(*fileWriter)){
+			std::cerr << "Error: could not write result TSV: "
+			          << opt::outputfile << "\n";
+			delete fileWriter;
+			return 1;
+		}
+		delete fileWriter;
+	}
+
+	// File-output runs also expose the complete result table on stdout. A TSV
+	// explicitly directed to /dev/stderr reaches stdout through the live log
+	// tee, so do not emit a second copy here.
+	if(opt::outputfile != "/dev/stderr"){
+		{
+			std::lock_guard<std::mutex> stdoutLock(stdoutWriteMutex);
+			std::cout << resultText << std::flush;
+		}
+		if(!std::cout){
+			std::cerr << "Error: could not write result TSV to standard output\n";
+			return 1;
+		}
 	}
 	return 0;
 }
@@ -2045,6 +2062,7 @@ private:
     void pump()
     {
         char buffer[8192];
+        std::string pendingStdout;
         while(true){
             ssize_t count = read(readFd_, buffer, sizeof(buffer));
             if(count == 0){
@@ -2058,10 +2076,24 @@ private:
             }
 
             const std::size_t size = static_cast<std::size_t>(count);
-            writeAll(logFd_, buffer, size);
-            if(mirrorToStdout_ && !logIsStdout_){
-                writeAll(STDOUT_FILENO, buffer, size);
+            if(!logIsStdout_){
+                writeAll(logFd_, buffer, size);
             }
+            if(mirrorToStdout_ || logIsStdout_){
+                pendingStdout.append(buffer, size);
+                std::string::size_type newline;
+                while((newline = pendingStdout.find('\n')) != std::string::npos){
+                    const std::size_t lineSize = newline + 1;
+                    std::lock_guard<std::mutex> stdoutLock(stdoutWriteMutex);
+                    writeAll(STDOUT_FILENO, pendingStdout.data(), lineSize);
+                    pendingStdout.erase(0, lineSize);
+                }
+            }
+        }
+
+        if(!pendingStdout.empty()){
+            std::lock_guard<std::mutex> stdoutLock(stdoutWriteMutex);
+            writeAll(STDOUT_FILENO, pendingStdout.data(), pendingStdout.size());
         }
 
         close(readFd_);
@@ -2095,6 +2127,7 @@ int main(int argc, char** argv)
     }
 
     if(opt::outputfile != "/dev/stdout"){
+        std::lock_guard<std::mutex> stdoutLock(stdoutWriteMutex);
         std::cout << "TelSeq started: result TSV " << opt::outputfile
                   << "; profile log " << opt::outputLog << std::endl;
     }
@@ -2135,6 +2168,7 @@ int main(int argc, char** argv)
     if(status != 0){
         std::cerr << "TelSeq failed; see log: " << opt::outputLog << "\n";
     }else if(opt::outputfile != "/dev/stdout"){
+        std::lock_guard<std::mutex> stdoutLock(stdoutWriteMutex);
         std::cout << "TelSeq completed: result TSV " << opt::outputfile
                   << "; profile log " << opt::outputLog << std::endl;
     }

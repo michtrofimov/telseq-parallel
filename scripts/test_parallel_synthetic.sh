@@ -50,6 +50,23 @@ run_stock_telseq() {
     "$stock_telseq" "${stock_output_args[@]}" "$@"
 }
 
+contains_line_subsequence() {
+    expected_file=$1
+    actual_file=$2
+    awk '
+        NR == FNR {
+            expected[++expected_count] = $0
+            next
+        }
+        matched < expected_count && $0 == expected[matched + 1] {
+            matched += 1
+        }
+        END {
+            if (matched != expected_count) exit 1
+        }
+    ' "$expected_file" "$actual_file"
+}
+
 assert_k_threshold() {
     label=$1
     expected_log=$2
@@ -343,12 +360,12 @@ if [ "$(grep -c '^TelSeq ' "$default_console_stdout")" -ne 2 ] ||
     sed -n '1,20p' "$default_console_stdout" >&2
     exit 76
 fi
-mirrored_default_log="$test_dir/default-artifacts.mirrored.log"
-sed '/^TelSeq started:/d; /^TelSeq completed:/d' \
-    "$default_console_stdout" >"$mirrored_default_log"
-if ! cmp -s "$default_log" "$mirrored_default_log"; then
-    echo "FAIL: stdout is not a complete live copy of the default log" >&2
-    diff -u "$default_log" "$mirrored_default_log" >&2 || true
+if ! contains_line_subsequence "$default_log" "$default_console_stdout"; then
+    echo "FAIL: stdout does not contain the complete live default log" >&2
+    exit 76
+fi
+if ! contains_line_subsequence "$default_tsv" "$default_console_stdout"; then
+    echo "FAIL: stdout does not contain the complete default result TSV" >&2
     exit 76
 fi
 if ! grep -q '^\[reference-profile\]' "$default_log"; then
@@ -378,6 +395,29 @@ fi
 if ! grep -q '^\[reference-profile\]' "$explicit_log"; then
     echo "FAIL: explicit --output-log does not contain reference profiles" >&2
     exit 81
+fi
+
+merged_tsv="$test_dir/merged-result.tsv"
+merged_log="$test_dir/merged-result.log"
+merged_stdout="$test_dir/merged-result.stdout"
+if ! "$new_telseq" -m \
+    --output-tsv "$merged_tsv" \
+    --output-log "$merged_log" \
+    "$bam" >"$merged_stdout" 2>"$test_dir/merged-result.stderr"; then
+    echo "FAIL[86]: merged read-group artifact execution failed" >&2
+    exit 86
+fi
+if ! awk -F '\t' '
+    NR > 1 && index($1, "|") > 0 { merged += 1; next }
+    NR > 1 && NF > 1 { regular += 1 }
+    END { if (merged != 1 || regular < 2) exit 1 }
+' "$merged_tsv"; then
+    echo "FAIL: -m did not retain regular rows and append one merged row" >&2
+    exit 87
+fi
+if ! contains_line_subsequence "$merged_tsv" "$merged_stdout"; then
+    echo "FAIL: merged read-group TSV was not also written to stdout" >&2
+    exit 88
 fi
 
 legacy_tsv="$test_dir/legacy-o-result.tsv"

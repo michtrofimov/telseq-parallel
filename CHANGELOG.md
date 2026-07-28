@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+## 0.5.0 - 2026-07-28
+
+### Changed
+
+- result tables, including `-m` merged read-group rows, are written to stdout
+  as well as to the selected `--output-tsv` file;
+- `-m` retains the regular per-read-group rows and appends the merged
+  weighted-average row instead of replacing those regular rows;
+- `--output-tsv /dev/stdout` still emits exactly one clean TSV copy and keeps
+  progress logging off that stream.
+
 ## 0.4.1 - 2026-07-28
 
 ### Changed
