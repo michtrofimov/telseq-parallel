@@ -27,6 +27,8 @@ for executable in \
     fi
 done
 
+new_telseq_absolute=$(CDPATH= cd -- "$(dirname -- "$new_telseq")" && pwd)/$(basename -- "$new_telseq")
+
 test_dir=$(mktemp -d "${TMPDIR:-/tmp}/telseq-parallel-test.XXXXXX")
 bam="$test_dir/parallel-fixture.bam"
 results_dir="$test_dir/results"
@@ -316,7 +318,7 @@ default_tsv="$test_dir/parallel-fixture.telseq.tsv"
 default_log="$test_dir/parallel-fixture.telseq.log"
 default_console_stdout="$test_dir/default-artifacts.stdout"
 default_console_stderr="$test_dir/default-artifacts.stderr"
-if ! (cd "$test_dir" && "$new_telseq" -t 22 "$bam" \
+if ! (cd "$test_dir" && "$new_telseq_absolute" -t 22 "$bam" \
     >"$default_console_stdout" 2>"$default_console_stderr"); then
     echo "FAIL[74]: default output-artifact execution failed" >&2
     sed -n '1,200p' "$default_console_stderr" >&2
