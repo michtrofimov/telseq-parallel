@@ -66,10 +66,10 @@ that:
   default, explicit artifact paths work, `-o` remains a TSV alias, and the
   default parallel log contains reference-profile rows; the default run also
   streams the complete log and result table to stdout around its
-  start/completion messages, a dedicated two-read-group fixture retains
-  regular rows and appends one merged row by default in both the TSV file and
-  stdout, `-m` produces the same output, and direct TSV streams contain no log
-  or status text; and
+  start/completion messages, a dedicated two-read-group fixture emits only
+  regular rows by default while `-m` retains them and appends one merged row in
+  both the TSV file and stdout, and direct TSV streams contain no log or status
+  text; and
 - the output contains `Total=1130`, `Mapped=1120`, and `Duplicates=3`.
 
 The fixture contains 1,129 physical records. The expected `Total` of 1,130
@@ -180,7 +180,7 @@ stock TelSeq output without installing the new executable on the host:
 ```bash
 scripts/compare_and_benchmark_docker.sh \
     --reference-output /path/to/stock-result.tsv \
-    ghcr.io/michtrofimov/telseq-parallel:0.5.1 \
+    ghcr.io/michtrofimov/telseq-parallel:0.5.2 \
     /path/to/sample.bam \
     4 8 22 44 \
     -- -r 151 -k 7

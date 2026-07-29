@@ -18,14 +18,14 @@ threshold used for each result row.
 The easiest installation is the released Linux AMD64 image:
 
 ```bash
-docker pull ghcr.io/michtrofimov/telseq-parallel:0.5.1
+docker pull ghcr.io/michtrofimov/telseq-parallel:0.5.2
 ```
 
 Check the installed version:
 
 ```bash
 docker run --rm \
-    ghcr.io/michtrofimov/telseq-parallel:0.5.1 \
+    ghcr.io/michtrofimov/telseq-parallel:0.5.2 \
     --version
 ```
 
@@ -157,8 +157,8 @@ current working directory. Parallel logs include the reference-window profile
 by default. The complete log is also streamed to standard output in real time,
 with short start and completion messages showing the selected paths. The
 result table is printed to standard output as well as saved to the TSV file.
-For a BAM with multiple read groups, it contains every regular row followed by
-one merged weighted-average row automatically.
+For a BAM with multiple read groups, pass `-m` to retain every regular row and
+append one merged weighted-average row.
 
 For `-t > 1`, one requested thread is reserved for a short HTSlib compatibility
 scan and the remaining threads consume indexed reference-window tasks
@@ -290,7 +290,7 @@ exactly one clean TSV is emitted there and neither log nor status text is added.
 | `--output-log PATH` | `<BAM basename>.telseq.log` | Write progress, diagnostics, timing, and reference-profile rows to this path. |
 | `-H` | off | Suppress the output header. Useful when appending several runs. |
 | `-h` | off | Print only the output header and exit. |
-| `-m` | compatibility | Retained for existing commands. Multi-read-group BAMs append the merged weighted-average row automatically. |
+| `-m` | off | Retain each regular read-group row and append one merged row using the inherited TelSeq weighted-mean calculation. |
 | `-u` | off | Ignore read groups and treat reads in each BAM as one group. |
 | `-w` | off | Treat all supplied BAMs as one logical BAM using the inherited TelSeq behavior. |
 | `-z PATTERN` | `TTAGGG` | Search for a custom motif and its reverse complement. |
@@ -386,7 +386,7 @@ docker run --rm \
     -v /path/to/bam-directory:/data:ro \
     -v "$PWD:/output" \
     -w /output \
-    ghcr.io/michtrofimov/telseq-parallel:0.5.1 \
+    ghcr.io/michtrofimov/telseq-parallel:0.5.2 \
     -t 22 -r 151 /data/sample.bam
 ```
 
@@ -401,7 +401,7 @@ To process several BAMs from the mounted directory:
 docker run --rm \
     -v /path/to/bam-directory:/data:ro \
     -v "$PWD:/output" \
-    ghcr.io/michtrofimov/telseq-parallel:0.5.1 \
+    ghcr.io/michtrofimov/telseq-parallel:0.5.2 \
     -t 22 -r 151 \
     --output-tsv /output/results.telseq.tsv \
     --output-log /output/results.telseq.log \
@@ -421,7 +421,7 @@ several thread counts, use the Docker benchmark wrapper documented in
 ```bash
 scripts/compare_and_benchmark_docker.sh \
     --reference-output stock-result.tsv \
-    ghcr.io/michtrofimov/telseq-parallel:0.5.1 \
+    ghcr.io/michtrofimov/telseq-parallel:0.5.2 \
     sample.bam \
     4 8 22 44 \
     -- -r 151

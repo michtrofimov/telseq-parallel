@@ -68,7 +68,7 @@ static const char *TELSEQ_USAGE_MESSAGE =
 "   -H                       remove header line, which is printed by default.\n"
 "   -h                       print the header line only. The text can be used to attach to result files, useful\n"
 "                            when the headers of the result files are suppressed. \n"
-"   -m                       compatibility flag; multi-read-group BAMs append a merged weighted-average row by default.\n"
+"   -m                       retain regular read-group rows and append one merged weighted-average row.\n"
 "   -u                       ignore read groups. Treat all reads in BAM as if they were from a same read group.\n"
 "   -t, --threads=INT        number of threads for one coordinate-sorted, indexed BAM. default = 1.\n"
 "                            Values greater than 1 reserve one compatibility scanner unless strict primary filtering is enabled.\n"
@@ -99,6 +99,7 @@ namespace opt
     static std::string exomebedfile = "";
     static std::map< std::string, std::vector<range> > exomebed;
     static bool writerheader = true;
+    static bool mergerg = false;
     static bool ignorerg = false;
     static bool onebam = false; // whether to consider all bams as one bam
     static unsigned int threads = 1;
@@ -1443,8 +1444,8 @@ int outputresults(std::vector< std::map<std::string, ScanResults> > resultlist){
 		ScanResults mergedrs;
 		std::string grpnames = "";
 
-		// Multi-read-group BAMs always append the inherited weighted-average row.
-		bool domg = resultmap.size() > 1;
+		// With -m, append the inherited weighted-average row.
+		bool domg = opt::mergerg && resultmap.size() > 1;
 
 		for(std::map<std::string, ScanResults>::iterator it= resultmap.begin();
 				it != resultmap.end(); ++it){
@@ -1682,9 +1683,7 @@ void parseScanOptions(int argc, char** argv)
             case 'H':
             	opt::writerheader=false; break;
             case 'm':
-                // Retained for command-line compatibility. Merging is now
-                // automatic whenever a BAM has more than one read group.
-                break;
+                opt::mergerg = true; break;
             case 'u':
                 opt::ignorerg = true; break;
             case 'w':

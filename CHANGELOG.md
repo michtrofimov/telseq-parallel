@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+## 0.5.2 - 2026-07-29
+
+### Changed
+
+- restored the `v0.5.0` read-group behavior: default output contains regular
+  rows only, while `-m` retains those rows and appends one merged
+  weighted-average row.
+
 ## 0.5.1 - 2026-07-28
 
 ### Changed
