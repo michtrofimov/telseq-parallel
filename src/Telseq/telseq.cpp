@@ -69,7 +69,7 @@ static const char *TELSEQ_USAGE_MESSAGE =
 "   -h                       print the header line only. The text can be used to attach to result files, useful\n"
 "                            when the headers of the result files are suppressed. \n"
 "   -m                       retain regular read-group rows and append one merged weighted-average row.\n"
-"   -u                       ignore read groups. Treat all reads in BAM as if they were from a same read group.\n"
+"   -u                       retain regular read-group rows and append one ungrouped whole-BAM row.\n"
 "   -t, --threads=INT        number of threads for one coordinate-sorted, indexed BAM. default = 1.\n"
 "                            Values greater than 1 reserve one compatibility scanner unless strict primary filtering is enabled.\n"
 "   --reference-window-size=INT\n"
@@ -162,6 +162,11 @@ void add_results(ScanResults& x, ScanResults& y){
 
 typedef std::map<std::string, ScanResults> ResultMap;
 typedef std::map<std::string, std::vector<range>::iterator> ExomeSearchHints;
+
+// Keep the whole-BAM -u accumulator separate from user-provided RG IDs. It is
+// converted to the public UNKNOWN label only when results are written.
+static const std::string UNGROUPED_RESULT_KEY =
+    std::string("\x1f") + "TELSEQ_UNGROUPED";
 
 struct ReferenceTask
 {
@@ -360,8 +365,8 @@ static bool convert_hts_alignment(
     return true;
 }
 
-// Scan one alignment into a worker-local result map. This mirrors the body of
-// the original serial scan loop, but never touches shared counters.
+// Scan one alignment into a result map. With -u, the record contributes both
+// to its declared read group (when available) and to the whole-BAM accumulator.
 static void scan_alignment_parallel(
     BamTools::BamAlignment& record,
     const bool rggroups,
@@ -371,26 +376,39 @@ static void scan_alignment_parallel(
     uint64_t& nprocessed)
 {
     std::string tag = opt::unknown;
+    ResultMap::iterator ungrouped =
+        resultmap.find(UNGROUPED_RESULT_KEY);
+    ResultMap::iterator result = resultmap.end();
+
     if (rggroups) {
         if (record.HasTag("RG")) {
             record.GetTag("RG", tag);
+            result = resultmap.find(tag);
+            if (result == resultmap.end() &&
+                ungrouped == resultmap.end()) {
+                std::ostringstream message;
+                message << "RG tag {" << tag << "} for read at position {"
+                        << record.RefID << ":" << record.Position
+                        << "} doesn't exist in BAM header.";
+                print_parallel_warning(message.str());
+                return;
+            }
         } else {
-            std::ostringstream message;
-            message << "can't find RG tag for read at position {"
-                    << record.RefID << ":" << record.Position << "}\n"
-                    << "skip this read\n";
-            print_parallel_warning(message.str());
-            return;
+            if (ungrouped == resultmap.end()) {
+                std::ostringstream message;
+                message << "can't find RG tag for read at position {"
+                        << record.RefID << ":" << record.Position << "}\n"
+                        << "skip this read\n";
+                print_parallel_warning(message.str());
+                return;
+            }
         }
+    } else {
+        result = resultmap.find(tag);
     }
 
-    ResultMap::iterator result = resultmap.find(tag);
-    if (result == resultmap.end()) {
-        std::ostringstream message;
-        message << "RG tag {" << tag << "} for read at position {"
-                << record.RefID << ":" << record.Position
-                << "} doesn't exist in BAM header.";
-        print_parallel_warning(message.str());
+    if (result == resultmap.end() &&
+        ungrouped == resultmap.end()) {
         return;
     }
 
@@ -404,7 +422,12 @@ static void scan_alignment_parallel(
             std::map<std::string, std::vector<range> >::iterator chromosome =
                 opt::exomebed.find(chrm);
             if (chromosome == opt::exomebed.end()) {
-                result->second.n_exreadsChrUnmatched += 1;
+                if (result != resultmap.end()) {
+                    result->second.n_exreadsChrUnmatched += 1;
+                }
+                if (ungrouped != resultmap.end()) {
+                    ungrouped->second.n_exreadsChrUnmatched += 1;
+                }
             } else {
                 const std::vector<range>::iterator end = chromosome->second.end();
                 ExomeSearchHints::iterator hint = lastfound.find(chrm);
@@ -414,7 +437,12 @@ static void scan_alignment_parallel(
                 std::vector<range>::iterator found =
                     searchRange(lastfound[chrm], end, alignmentRange);
                 if (found != end) {
-                    result->second.n_exreadsExcluded += 1;
+                    if (result != resultmap.end()) {
+                        result->second.n_exreadsExcluded += 1;
+                    }
+                    if (ungrouped != resultmap.end()) {
+                        ungrouped->second.n_exreadsExcluded += 1;
+                    }
                     lastfound[chrm] = found;
                     return;
                 }
@@ -422,13 +450,28 @@ static void scan_alignment_parallel(
         }
     }
 
-    result->second.numTotal += 1;
+    if (result != resultmap.end()) {
+        result->second.numTotal += 1;
+    }
+    if (ungrouped != resultmap.end()) {
+        ungrouped->second.numTotal += 1;
+    }
 
     if (record.IsMapped()) {
-        result->second.numMapped += 1;
+        if (result != resultmap.end()) {
+            result->second.numMapped += 1;
+        }
+        if (ungrouped != resultmap.end()) {
+            ungrouped->second.numMapped += 1;
+        }
     }
     if (record.IsDuplicate()) {
-        result->second.numDuplicates += 1;
+        if (result != resultmap.end()) {
+            result->second.numDuplicates += 1;
+        }
+        if (ungrouped != resultmap.end()) {
+            ungrouped->second.numDuplicates += 1;
+        }
     }
 
     const double gc = calcGC(record.QueryBases);
@@ -438,7 +481,12 @@ static void scan_alignment_parallel(
     if (ptn_count > ScanParameters::TEL_MOTIF_N - 1) {
         return;
     }
-    result->second.telcounts[ptn_count] += 1;
+    if (result != resultmap.end()) {
+        result->second.telcounts[ptn_count] += 1;
+    }
+    if (ungrouped != resultmap.end()) {
+        ungrouped->second.telcounts[ptn_count] += 1;
+    }
 
     if (gc >= ScanParameters::GC_LOWERBOUND &&
         gc <= ScanParameters::GC_UPPERBOUND) {
@@ -453,7 +501,12 @@ static void scan_alignment_parallel(
             print_parallel_warning(message.str());
             return;
         }
-        result->second.gccounts[idx] += 1;
+        if (result != resultmap.end()) {
+            result->second.gccounts[idx] += 1;
+        }
+        if (ungrouped != resultmap.end()) {
+            ungrouped->second.gccounts[idx] += 1;
+        }
     }
 
     nprocessed += 1;
@@ -1102,6 +1155,8 @@ void merge_results_by_readgroup(
 
             if(mergedresults.find(rg) == mergedresults.end()){
                 mergedresults[rg] = result;
+            }else if(rg == UNGROUPED_RESULT_KEY){
+                add_thread_results(mergedresults[rg], result);
             }else{
                 add_results(mergedresults[rg], result);
             }
@@ -1132,7 +1187,6 @@ int scanBam()
       std::map<std::string, ScanResults> resultmap;
       // store where the overlap was last found in the case of exome seq
       std::map<std::string, std::vector<range>::iterator> lastfound;
-      std::vector<range>::iterator searchhint;
 
       std::cerr << "Start analysing BAM " << opt::bamlist[i] << "\n";
 
@@ -1172,12 +1226,6 @@ int scanBam()
                   << "directly comparable with stock/default TelSeq output\n";
       }
 
-      if(opt::ignorerg){ // ignore read groups
-	      std::cerr << "Treat all reads in BAM as if they were from a same sample" << std::endl;
-	      ScanResults results;
-	      results.sample = opt::unknown;
-	      resultmap[opt::unknown]=results;
-      }else{
 	std::map <std::string, std::string> readgroups;
 	std::map <std::string, std::string> readlibs;
 
@@ -1202,6 +1250,15 @@ int scanBam()
 		  resultmap[rgid]=results; //results are identified by RG tag.
 	  }
 
+	  if(opt::ignorerg){
+	    ScanResults ungrouped;
+	    ungrouped.sample = opt::unknown;
+	    ungrouped.lib = opt::unknown;
+	    resultmap[UNGROUPED_RESULT_KEY] = ungrouped;
+	    std::cerr << "-u enabled: retaining declared read groups and "
+	              << "appending one ungrouped whole-BAM result" << std::endl;
+	  }
+
 	}else{
 	  std::cerr << "Warning: can't find RG tag in the BAM header" << std::endl;
 	  std::cerr << "Warning: treat all reads in BAM as if they were from a same sample" << std::endl;
@@ -1210,7 +1267,6 @@ int scanBam()
 	  results.lib = opt::unknown;
 	  resultmap[opt::unknown]=results;
 	}
-      }
 
       if(opt::threads > 1){
         ResultMap parallelResults;
@@ -1241,7 +1297,7 @@ int scanBam()
       BamTools::BamAlignment record1;
       bool done = false;
 
-      int nprocessed=0; // number of reads analyzed
+      uint64_t nprocessed=0; // number of reads analyzed
       int ntotal=0; // number of reads scanned in bam (we skip some reads, see below)
       while(!done) {
 	ntotal ++;
@@ -1256,91 +1312,16 @@ int scanBam()
 	    continue;
 	  }
 	}
-	std::string tag = opt::unknown;
-	if(rggroups){
-	  // skip reads that do not have read group tag
-	  if(record1.HasTag("RG")){
-	    record1.GetTag("RG", tag);
-	  }else{
-	    std::cerr << "can't find RG tag for read at position {" << record1.RefID << ":" << record1.Position << "}" << std::endl;
-	    std::cerr << "skip this read" << std::endl;
-	    continue;
-	  }
-	}
+	const uint64_t processedBefore = nprocessed;
+	scan_alignment_parallel(
+	    record1,
+	    rggroups,
+	    isExome,
+	    resultmap,
+	    lastfound,
+	    nprocessed);
 
-	// skip reads with readgroup not defined in BAM header
-	if(resultmap.find(tag) == resultmap.end()){
-	  std::cerr << "RG tag {" << tag << "} for read at position ";
-	  std::cerr << "{" << record1.RefID << ":" << record1.Position << "} doesn't exist in BAM header.";
-	  continue;
-	}
-
-	// for exome, exclude reads mapped to the exome regions.
-	if(isExome){
-	  range rg;
-	  rg.first = record1.Position;
-	  rg.second = record1.Position + record1.Length;
-	  std::string chrm =  refID2Name(record1.RefID);
-
-	  if(chrm != "-1"){ // check if overlap exome when the read is mapped to chr1-22, X, Y
-	    std::map<std::string, std::vector<range> >::iterator chrmit = opt::exomebed.find(chrm);
-	    if(chrmit == opt::exomebed.end()) {
-		// unmapped reads can have chr names as a star (*). We also don't consider MT reads.
-		resultmap[tag].n_exreadsChrUnmatched +=1;
-	    } else {
-	      std::vector<range>::iterator itend = opt::exomebed[chrm].end();
-	      std::map<std::string, std::vector<range>::iterator>::iterator lastfoundchrmit = lastfound.find(chrm);
-	      if(lastfoundchrmit == lastfound.end()){ // first entry to this chrm
-		      lastfound[chrm] = chrmit->second.begin();// start from begining
-	      }
-	      // set the hint to where the previous found is
-	      searchhint = lastfound[chrm];
-	      std::vector<range>::iterator itsearch = searchRange(searchhint, itend, rg);
-	      // if found
-	      if(itsearch != itend){// if found
-		searchhint = itsearch;
-		resultmap[tag].n_exreadsExcluded +=1;
-		lastfound[chrm] = searchhint; // update search hint
-		continue;
-	      }
-	    }
-
-	  }
-	}
-
-	resultmap[tag].numTotal +=1;
-
-	if(record1.IsMapped()) {
-	    resultmap[tag].numMapped += 1;
-	}
-
-	if(record1.IsDuplicate()) {
-	    resultmap[tag].numDuplicates +=1;
-	}
-
-	double gc = calcGC(record1.QueryBases);
-	int ptn_count = countMotif(record1.QueryBases, opt::PATTERN, opt::PATTERN_REV);
-	// when the read length exceeds 100bp, number of patterns might exceed the boundary
-	if (ptn_count > ScanParameters::TEL_MOTIF_N-1){
-	    continue;
-	}
-	resultmap[tag].telcounts[ptn_count]+=1;
-
-
-	if(gc >= ScanParameters::GC_LOWERBOUND && gc <= ScanParameters::GC_UPPERBOUND){
-	  // get index for GC bin.
-	  int idx = floor((gc-ScanParameters::GC_LOWERBOUND)/ScanParameters::GC_BINSIZE);
-	  assert(idx >=0 && idx <= ScanParameters::GC_BIN_N-1);
-	  if(idx > ScanParameters::GC_BIN_N-1){
-	    std::cerr << nprocessed << " GC:{"<< gc << "} telcounts:{"<< ptn_count <<"} GC bin index out of bound:" << idx << "\n";
-	    exit(EXIT_FAILURE);
-	  }
-	  resultmap[tag].gccounts[idx]+=1;
-	}
-
-	nprocessed++;
-
-	if( nprocessed%10000000 == 0){
+	if(nprocessed != processedBefore && nprocessed%10000000 == 0){
 	  std::cerr << "[scan] processed " << nprocessed << " reads \n" ;
 	}
       }
@@ -1379,7 +1360,9 @@ void printlog(std::vector< std::map<std::string, ScanResults> > resultlist){
 		for(std::map<std::string, ScanResults>::iterator it= rmap.begin();
 				it != rmap.end(); ++it){
 
-			std::string rg = it ->first;
+			std::string rg = it ->first == UNGROUPED_RESULT_KEY
+				? opt::unknown
+				: it ->first;
 			ScanResults result = it -> second;
 			std::cerr << "BAM:" << rg << std::endl;
 			std::cerr << "	chr ID unmatched reads: " << result.n_exreadsChrUnmatched << std::endl;
@@ -1443,15 +1426,23 @@ int outputresults(std::vector< std::map<std::string, ScanResults> > resultlist){
 		std::map<std::string, ScanResults> resultmap = resultlist[i];
 		ScanResults mergedrs;
 		std::string grpnames = "";
+		std::map<std::string, ScanResults>::iterator ungrouped =
+			resultmap.find(UNGROUPED_RESULT_KEY);
+		const std::size_t regularGroupCount =
+			resultmap.size() - (ungrouped == resultmap.end() ? 0 : 1);
 
 		// With -m, append the inherited weighted-average row.
-		bool domg = opt::mergerg && resultmap.size() > 1;
+		bool domg = opt::mergerg && regularGroupCount > 1;
 
 		for(std::map<std::string, ScanResults>::iterator it= resultmap.begin();
 				it != resultmap.end(); ++it){
 
 			std::string rg = it ->first;
 			ScanResults result = it -> second;
+
+			if(rg == UNGROUPED_RESULT_KEY){
+				continue;
+			}
 
 			if(domg){
 				if(grpnames.size()==0){
@@ -1490,10 +1481,17 @@ int outputresults(std::vector< std::map<std::string, ScanResults> > resultlist){
 				mergedrs.gccounts[k] /= mergedrs.numTotal;
 			}
 
-			mergedrs.numTotal  /= resultmap.size();
+			mergedrs.numTotal  /= regularGroupCount;
 
 			printout(grpnames, mergedrs, pWriter);
 		};
+
+		// With -u, append the exact whole-BAM aggregate after all regular and
+		// optional -m rows. Its metadata is intentionally explicit rather than
+		// borrowing one arbitrary read group's header values.
+		if(ungrouped != resultmap.end()){
+			printout(opt::unknown, ungrouped->second, pWriter);
+		}
 	}
 
 	const std::string resultText = resultBuffer.str();

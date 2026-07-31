@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+### Changed
+
+- `-u` now retains every declared read-group row and appends one exact
+  whole-BAM aggregate row, matching the additive output style of `-m`;
+- the appended `-u` row explicitly reports `UNKNOWN` for read group, library,
+  and sample, while the regular rows preserve their BAM-header metadata;
+- reads with missing or undeclared `RG` tags still contribute to the `-u`
+  whole-BAM aggregate.
+
 ## 0.5.2 - 2026-07-29
 
 ### Changed
