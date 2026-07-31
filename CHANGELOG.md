@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.5.3 - 2026-07-31
+
 ### Changed
 
 - `-u` now retains every declared read-group row and appends one exact

@@ -181,7 +181,7 @@ stock TelSeq output without installing the new executable on the host:
 ```bash
 scripts/compare_and_benchmark_docker.sh \
     --reference-output /path/to/stock-result.tsv \
-    ghcr.io/michtrofimov/telseq-parallel:0.5.2 \
+    ghcr.io/michtrofimov/telseq-parallel:0.5.3 \
     /path/to/sample.bam \
     4 8 22 44 \
     -- -r 151 -k 7
