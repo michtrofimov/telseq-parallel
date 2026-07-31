@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+## 0.5.5 - 2026-07-31
+
+### Changed
+
+- the appended `-m` row now reports position-matched pipe-delimited read
+  groups, libraries, and samples instead of leaving the library empty and
+  retaining only one sample value.
+
 ## 0.5.4 - 2026-07-31
 
 ### Changed

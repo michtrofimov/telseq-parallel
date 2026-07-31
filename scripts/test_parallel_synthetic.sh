@@ -433,11 +433,17 @@ if ! "$new_telseq" -m \
     exit 89
 fi
 if ! awk -F '\t' '
-    NR > 1 && index($1, "|") > 0 { merged += 1; next }
+    NR > 1 && index($1, "|") > 0 {
+        merged += 1
+        if ($1 != "rg1|rg2" ||
+            $2 != "library|library" ||
+            $3 != "sample|sample") invalid = 1
+        next
+    }
     NR > 1 && NF > 1 { regular += 1 }
-    END { if (merged != 1 || regular < 2) exit 1 }
+    END { if (merged != 1 || regular < 2 || invalid) exit 1 }
 ' "$merged_tsv"; then
-    echo "FAIL: -m did not retain regular rows and append one merged row" >&2
+    echo "FAIL: -m did not append one merged row with pipe-labelled metadata" >&2
     exit 89
 fi
 if ! contains_line_subsequence "$regular_tsv" "$merged_tsv" ||

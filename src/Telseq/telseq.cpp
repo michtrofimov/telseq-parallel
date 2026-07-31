@@ -68,7 +68,7 @@ static const char *TELSEQ_USAGE_MESSAGE =
 "   -H                       remove header line, which is printed by default.\n"
 "   -h                       print the header line only. The text can be used to attach to result files, useful\n"
 "                            when the headers of the result files are suppressed. \n"
-"   -m                       retain regular read-group rows and append one merged weighted-average row.\n"
+"   -m                       retain regular read-group rows and append one merged weighted-average row with joined metadata.\n"
 "   -u                       retain regular read-group rows and append one combined declared-read-group row.\n"
 "   -t, --threads=INT        number of threads for one coordinate-sorted, indexed BAM. default = 1.\n"
 "                            Values greater than 1 reserve one compatibility scanner unless strict primary filtering is enabled.\n"
@@ -1465,13 +1465,9 @@ int outputresults(std::vector< std::map<std::string, ScanResults> > resultlist){
 			}
 
 			if(domg){
-				if(grpnames.size()==0){
-					grpnames += rg;
-				}else{
-					grpnames += "|"+rg;
-				}
-
-				mergedrs.sample = result.sample;
+				append_pipe_value(grpnames, rg);
+				append_pipe_value(mergedrs.lib, result.lib);
+				append_pipe_value(mergedrs.sample, result.sample);
 				mergedrs.numTotal += result.numTotal;
 				mergedrs.numMapped += result.numMapped * result.numTotal;
 				mergedrs.numDuplicates += result.numDuplicates * result.numTotal;

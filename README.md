@@ -18,14 +18,14 @@ threshold used for each result row.
 The easiest installation is the released Linux AMD64 image:
 
 ```bash
-docker pull ghcr.io/michtrofimov/telseq-parallel:0.5.4
+docker pull ghcr.io/michtrofimov/telseq-parallel:0.5.5
 ```
 
 Check the installed version:
 
 ```bash
 docker run --rm \
-    ghcr.io/michtrofimov/telseq-parallel:0.5.4 \
+    ghcr.io/michtrofimov/telseq-parallel:0.5.5 \
     --version
 ```
 
@@ -159,9 +159,10 @@ by default. The complete log is also streamed to standard output in real time,
 with short start and completion messages showing the selected paths. The
 result table is printed to standard output as well as saved to the TSV file.
 For a BAM with multiple read groups, pass `-m` to retain every regular row and
-append one merged weighted-average row. Pass `-u` to retain the regular rows
-and append one exact aggregate row whose read-group, library, and sample fields
-are position-matched pipe-delimited lists such as `RG1|RG2|RG3`.
+append one merged weighted-average row. Both `-m` and `-u` use position-matched
+pipe-delimited read-group, library, and sample metadata such as
+`RG1|RG2|RG3`. The difference is that `-u` appends an exact aggregate of the
+declared read-group counts.
 
 For `-t > 1`, one requested thread is reserved for a short HTSlib compatibility
 scan and the remaining threads consume indexed reference-window tasks
@@ -293,7 +294,7 @@ exactly one clean TSV is emitted there and neither log nor status text is added.
 | `--output-log PATH` | `<BAM basename>.telseq.log` | Write progress, diagnostics, timing, and reference-profile rows to this path. |
 | `-H` | off | Suppress the output header. Useful when appending several runs. |
 | `-h` | off | Print only the output header and exit. |
-| `-m` | off | Retain each regular read-group row and append one merged row using the inherited TelSeq weighted-mean calculation. |
+| `-m` | off | Retain each regular read-group row and append one merged row using the inherited TelSeq weighted-mean calculation. Read-group, library, and sample metadata are joined positionally with `|`. |
 | `-u` | off | Retain regular read-group rows and append one exact aggregate of declared read groups. Read-group, library, and sample metadata are joined positionally with `|`; reads with missing or undeclared `RG` tags are skipped. |
 | `-w` | off | Treat all supplied BAMs as one logical BAM using the inherited TelSeq behavior. |
 | `-z PATTERN` | `TTAGGG` | Search for a custom motif and its reverse complement. |
@@ -341,9 +342,9 @@ merged or combined declared-read-group result.
 
 | Column | Meaning |
 | --- | --- |
-| `ReadGroup` | Read-group ID, `UNKNOWN` when read groups are absent, or the position-matched `RG1|RG2|...` list on an appended `-u` row. |
-| `Library` | `LB` value from the BAM read-group header, if available; appended `-u` rows use the corresponding pipe-delimited list. |
-| `Sample` | `SM` value from the BAM read-group header, if available; appended `-u` rows use the corresponding pipe-delimited list. |
+| `ReadGroup` | Read-group ID, `UNKNOWN` when read groups are absent, or the position-matched `RG1|RG2|...` list on an appended `-m` or `-u` row. |
+| `Library` | `LB` value from the BAM read-group header, if available; appended `-m` and `-u` rows use the corresponding pipe-delimited list. |
+| `Sample` | `SM` value from the BAM read-group header, if available; appended `-m` and `-u` rows use the corresponding pipe-delimited list. |
 | `Total` | Reads counted for the output group. |
 | `Mapped` | Count of reads without SAM flag `0x4`. |
 | `Duplicates` | Count of reads with SAM flag `0x400`. |
@@ -390,7 +391,7 @@ docker run --rm \
     -v /path/to/bam-directory:/data:ro \
     -v "$PWD:/output" \
     -w /output \
-    ghcr.io/michtrofimov/telseq-parallel:0.5.4 \
+    ghcr.io/michtrofimov/telseq-parallel:0.5.5 \
     -t 22 -r 151 /data/sample.bam
 ```
 
@@ -405,7 +406,7 @@ To process several BAMs from the mounted directory:
 docker run --rm \
     -v /path/to/bam-directory:/data:ro \
     -v "$PWD:/output" \
-    ghcr.io/michtrofimov/telseq-parallel:0.5.4 \
+    ghcr.io/michtrofimov/telseq-parallel:0.5.5 \
     -t 22 -r 151 \
     --output-tsv /output/results.telseq.tsv \
     --output-log /output/results.telseq.log \
@@ -425,7 +426,7 @@ several thread counts, use the Docker benchmark wrapper documented in
 ```bash
 scripts/compare_and_benchmark_docker.sh \
     --reference-output stock-result.tsv \
-    ghcr.io/michtrofimov/telseq-parallel:0.5.4 \
+    ghcr.io/michtrofimov/telseq-parallel:0.5.5 \
     sample.bam \
     4 8 22 44 \
     -- -r 151
