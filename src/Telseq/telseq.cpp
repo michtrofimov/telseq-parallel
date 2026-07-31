@@ -69,7 +69,7 @@ static const char *TELSEQ_USAGE_MESSAGE =
 "   -h                       print the header line only. The text can be used to attach to result files, useful\n"
 "                            when the headers of the result files are suppressed. \n"
 "   -m                       retain regular read-group rows and append one merged weighted-average row.\n"
-"   -u                       retain regular read-group rows and append one ungrouped whole-BAM row.\n"
+"   -u                       retain regular read-group rows and append one combined declared-read-group row.\n"
 "   -t, --threads=INT        number of threads for one coordinate-sorted, indexed BAM. default = 1.\n"
 "                            Values greater than 1 reserve one compatibility scanner unless strict primary filtering is enabled.\n"
 "   --reference-window-size=INT\n"
@@ -163,10 +163,20 @@ void add_results(ScanResults& x, ScanResults& y){
 typedef std::map<std::string, ScanResults> ResultMap;
 typedef std::map<std::string, std::vector<range>::iterator> ExomeSearchHints;
 
-// Keep the whole-BAM -u accumulator separate from user-provided RG IDs. It is
-// converted to the public UNKNOWN label only when results are written.
+// Keep the combined -u accumulator separate from user-provided RG IDs. Its
+// public label is assembled from the declared read groups when output is set up.
 static const std::string UNGROUPED_RESULT_KEY =
     std::string("\x1f") + "TELSEQ_UNGROUPED";
+
+static void append_pipe_value(
+    std::string& destination,
+    const std::string& value)
+{
+    if (!destination.empty()) {
+        destination += "|";
+    }
+    destination += value;
+}
 
 struct ReferenceTask
 {
@@ -365,8 +375,8 @@ static bool convert_hts_alignment(
     return true;
 }
 
-// Scan one alignment into a result map. With -u, the record contributes both
-// to its declared read group (when available) and to the whole-BAM accumulator.
+// Scan one alignment into a result map. With -u, a record carrying a declared
+// RG contributes both to that read group and to the combined accumulator.
 static void scan_alignment_parallel(
     BamTools::BamAlignment& record,
     const bool rggroups,
@@ -384,31 +394,28 @@ static void scan_alignment_parallel(
         if (record.HasTag("RG")) {
             record.GetTag("RG", tag);
             result = resultmap.find(tag);
-            if (result == resultmap.end() &&
-                ungrouped == resultmap.end()) {
+            if (result == resultmap.end()) {
                 std::ostringstream message;
                 message << "RG tag {" << tag << "} for read at position {"
                         << record.RefID << ":" << record.Position
-                        << "} doesn't exist in BAM header.";
-                print_parallel_warning(message.str());
-                return;
-            }
-        } else {
-            if (ungrouped == resultmap.end()) {
-                std::ostringstream message;
-                message << "can't find RG tag for read at position {"
-                        << record.RefID << ":" << record.Position << "}\n"
+                        << "} doesn't exist in BAM header.\n"
                         << "skip this read\n";
                 print_parallel_warning(message.str());
                 return;
             }
+        } else {
+            std::ostringstream message;
+            message << "can't find RG tag for read at position {"
+                    << record.RefID << ":" << record.Position << "}\n"
+                    << "skip this read\n";
+            print_parallel_warning(message.str());
+            return;
         }
     } else {
         result = resultmap.find(tag);
     }
 
-    if (result == resultmap.end() &&
-        ungrouped == resultmap.end()) {
+    if (result == resultmap.end()) {
         return;
     }
 
@@ -1156,6 +1163,11 @@ void merge_results_by_readgroup(
             if(mergedresults.find(rg) == mergedresults.end()){
                 mergedresults[rg] = result;
             }else if(rg == UNGROUPED_RESULT_KEY){
+                append_pipe_value(
+                    mergedresults[rg].readGroupLabel,
+                    result.readGroupLabel);
+                append_pipe_value(mergedresults[rg].lib, result.lib);
+                append_pipe_value(mergedresults[rg].sample, result.sample);
                 add_thread_results(mergedresults[rg], result);
             }else{
                 add_results(mergedresults[rg], result);
@@ -1233,8 +1245,10 @@ int scanBam()
 
 	if(rggroups){
 	  for(BamTools::SamReadGroupConstIterator it = header.ReadGroups.Begin(); it != header.ReadGroups.End();++it){
-	    readgroups[it->ID]= it->Sample;
-	    if(it->HasLibrary()){
+	    readgroups[it->ID] = it->Sample.empty()
+	      ? opt::unknown
+	      : it->Sample;
+	    if(it->HasLibrary() && !it->Library.empty()){
 	      readlibs[it->ID] = it -> Library;
 	    }else{
 	      readlibs[it->ID] = opt::unknown;
@@ -1252,11 +1266,17 @@ int scanBam()
 
 	  if(opt::ignorerg){
 	    ScanResults ungrouped;
-	    ungrouped.sample = opt::unknown;
-	    ungrouped.lib = opt::unknown;
+	    for(std::map<std::string, std::string>::iterator it = readgroups.begin();
+	        it != readgroups.end();
+	        ++it){
+	      append_pipe_value(ungrouped.readGroupLabel, it->first);
+	      append_pipe_value(ungrouped.lib, readlibs[it->first]);
+	      append_pipe_value(ungrouped.sample, it->second);
+	    }
 	    resultmap[UNGROUPED_RESULT_KEY] = ungrouped;
 	    std::cerr << "-u enabled: retaining declared read groups and "
-	              << "appending one ungrouped whole-BAM result" << std::endl;
+	              << "appending one combined declared-read-group result"
+	              << std::endl;
 	  }
 
 	}else{
@@ -1486,11 +1506,14 @@ int outputresults(std::vector< std::map<std::string, ScanResults> > resultlist){
 			printout(grpnames, mergedrs, pWriter);
 		};
 
-		// With -u, append the exact whole-BAM aggregate after all regular and
-		// optional -m rows. Its metadata is intentionally explicit rather than
-		// borrowing one arbitrary read group's header values.
+		// With -u, append the exact declared-read-group aggregate after all
+		// regular and optional -m rows. Read-group, library, and sample fields
+		// preserve their positional relationship through pipe-delimited labels.
 		if(ungrouped != resultmap.end()){
-			printout(opt::unknown, ungrouped->second, pWriter);
+			printout(
+				ungrouped->second.readGroupLabel,
+				ungrouped->second,
+				pWriter);
 		}
 	}
 

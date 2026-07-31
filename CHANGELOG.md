@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+## 0.5.4 - 2026-07-31
+
+### Changed
+
+- the appended `-u` row now reports position-matched pipe-delimited read
+  groups, libraries, and samples, such as `RG1|RG2`, `LIB1|LIB2`, and
+  `SAMPLE1|SAMPLE2`;
+- reads with missing `RG` tags or tags not declared in the BAM header are
+  skipped and do not contribute to either regular or appended `-u` results.
+
 ## 0.5.3 - 2026-07-31
 
 ### Changed

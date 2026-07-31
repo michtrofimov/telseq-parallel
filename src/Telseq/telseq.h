@@ -65,7 +65,7 @@ struct ScanResults
 {
 	std::string sample;
 	std::string lib;
-	std::string bam;
+	std::string readGroupLabel;
 	std::vector<uint64_t> telcounts;
 	std::vector<uint64_t> gccounts;
 	uint64_t numTotal;

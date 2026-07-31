@@ -41,17 +41,20 @@ static BamTools::BamAlignment make_alignment(
                 static_cast<uint32_t>(sequence.size())));
     }
 
-    alignment.AddTag("RG", "Z", readGroup);
+    if (!readGroup.empty()) {
+        alignment.AddTag("RG", "Z", readGroup);
+    }
     return alignment;
 }
 
 int main(int argc, char** argv)
 {
-    if (argc < 2 || argc > 8) {
+    if (argc < 2 || argc > 9) {
         std::cerr << "Usage: " << argv[0]
                   << " OUTPUT.bam [READS_PER_REFERENCE [READ_LENGTH "
                   << "[NO_COORDINATE_READS [WINDOW_BOUNDARY_READS "
-                  << "[PRIMARY_REFERENCE_STYLE [READ_GROUPS]]]]]]\n";
+                  << "[PRIMARY_REFERENCE_STYLE [READ_GROUPS "
+                  << "[READ_GROUP_ANOMALIES]]]]]]]\n";
         return 2;
     }
 
@@ -65,14 +68,17 @@ int main(int argc, char** argv)
     const int primaryReferenceStyle =
         argc >= 7 ? std::atoi(argv[6]) : 0;
     const int readGroupCount = argc >= 8 ? std::atoi(argv[7]) : 1;
+    const int readGroupAnomalies = argc >= 9 ? std::atoi(argv[8]) : 0;
     if (readsPerReference < 1 || readLength < 100 || readLength > 100000 ||
         requestedNoCoordinateRecords < 0 || primaryReferenceStyle < 0 ||
         primaryReferenceStyle > 2 || readGroupCount < 1 ||
-        readGroupCount > 64) {
+        readGroupCount > 64 || readGroupAnomalies < 0 ||
+        readGroupAnomalies > 1) {
         std::cerr << "READS_PER_REFERENCE must be positive and READ_LENGTH "
                   << "must be between 100 and 100000; NO_COORDINATE_READS "
                   << "must not be negative; PRIMARY_REFERENCE_STYLE must "
-                  << "be 0, 1, or 2; READ_GROUPS must be from 1 to 64\n";
+                  << "be 0, 1, or 2; READ_GROUPS must be from 1 to 64; "
+                  << "READ_GROUP_ANOMALIES must be 0 or 1\n";
         return 2;
     }
 
@@ -154,6 +160,14 @@ int main(int argc, char** argv)
         }
 
         for (int i = 0; i < readsPerReference; ++i) {
+            std::string readGroup =
+                "rg" + std::to_string(i % readGroupCount + 1);
+            if (readGroupAnomalies != 0 && refID == 0 && i == 0) {
+                readGroup.clear();
+            } else if (readGroupAnomalies != 0 &&
+                       refID == 0 && i == 1) {
+                readGroup = "undeclared";
+            }
             BamTools::BamAlignment alignment = make_alignment(
                 "mapped-" + std::to_string(refID) + "-" +
                     std::to_string(i),
@@ -162,7 +176,7 @@ int main(int argc, char** argv)
                 i == 0 ? telomeric : ordinary,
                 true,
                 refID == 0 && i == 1,
-                "rg" + std::to_string(i % readGroupCount + 1));
+                readGroup);
 
             if (i % 2 == 1) {
                 alignment.SetIsReverseStrand(true);

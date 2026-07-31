@@ -68,9 +68,10 @@ that:
   streams the complete log and result table to stdout around its
   start/completion messages, a dedicated two-read-group fixture emits only
   regular rows by default, `-m` retains them and appends one merged row, and
-  `-u` retains them and appends one exact `UNKNOWN` whole-BAM row in both
-  serial and parallel output; all appended tables are mirrored to stdout, and
-  direct TSV streams contain no log or status text; and
+  `-u` retains them and appends one exact pipe-labelled declared-read-group
+  aggregate in both serial and parallel output while rejecting missing and
+  undeclared `RG` tags; all appended tables are mirrored to stdout, and direct
+  TSV streams contain no log or status text; and
 - the output contains `Total=1130`, `Mapped=1120`, and `Duplicates=3`.
 
 The fixture contains 1,129 physical records. The expected `Total` of 1,130
@@ -181,7 +182,7 @@ stock TelSeq output without installing the new executable on the host:
 ```bash
 scripts/compare_and_benchmark_docker.sh \
     --reference-output /path/to/stock-result.tsv \
-    ghcr.io/michtrofimov/telseq-parallel:0.5.3 \
+    ghcr.io/michtrofimov/telseq-parallel:0.5.4 \
     /path/to/sample.bam \
     4 8 22 44 \
     -- -r 151 -k 7

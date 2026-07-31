@@ -446,32 +446,42 @@ if ! contains_line_subsequence "$regular_tsv" "$merged_tsv" ||
     exit 89
 fi
 
+ungrouped_bam="$test_dir/ungrouped-read-groups.bam"
+"$fixture_generator" "$ungrouped_bam" 20 100 8 0 0 2 1
+ungrouped_regular_tsv="$test_dir/ungrouped-regular-result.tsv"
+if ! "$new_telseq" \
+    --output-tsv "$ungrouped_regular_tsv" \
+    --output-log "$test_dir/ungrouped-regular-result.log" \
+    "$ungrouped_bam" >"$test_dir/ungrouped-regular-result.stdout" \
+    2>"$test_dir/ungrouped-regular-result.stderr"; then
+    echo "FAIL[90]: regular anomalous-read-group execution failed" >&2
+    exit 90
+fi
+
 ungrouped_tsv="$test_dir/ungrouped-result.tsv"
 ungrouped_log="$test_dir/ungrouped-result.log"
 ungrouped_stdout="$test_dir/ungrouped-result.stdout"
 if ! "$new_telseq" -u \
     --output-tsv "$ungrouped_tsv" \
     --output-log "$ungrouped_log" \
-    "$merged_bam" >"$ungrouped_stdout" \
+    "$ungrouped_bam" >"$ungrouped_stdout" \
     2>"$test_dir/ungrouped-result.stderr"; then
-    echo "FAIL[90]: ungrouped read-group artifact execution failed" >&2
-    exit 90
+    echo "FAIL[91]: combined read-group artifact execution failed" >&2
+    exit 91
 fi
 if ! awk -F '\t' '
     NR == 1 { next }
     NF > 1 {
         last_data_line = NR
-        if ($1 == "UNKNOWN") {
+        if (index($1, "|") > 0) {
             ungrouped += 1
             ungrouped_line = NR
             ungrouped_total = $4
             ungrouped_mapped = $5
             ungrouped_duplicates = $6
-            if ($2 != "UNKNOWN" || $3 != "UNKNOWN") invalid = 1
-            next
-        }
-        if (index($1, "|") > 0) {
-            invalid = 1
+            if ($1 != "rg1|rg2" ||
+                $2 != "library|library" ||
+                $3 != "sample|sample") invalid = 1
             next
         }
         regular += 1
@@ -487,34 +497,39 @@ if ! awk -F '\t' '
             ungrouped_duplicates != regular_duplicates) exit 1
     }
 ' "$ungrouped_tsv"; then
-    echo "FAIL: -u did not retain regular rows and append one exact UNKNOWN aggregate" >&2
-    exit 91
+    echo "FAIL: -u did not append the exact pipe-labelled declared-RG aggregate" >&2
+    exit 92
 fi
-if ! contains_line_subsequence "$regular_tsv" "$ungrouped_tsv" ||
+if ! contains_line_subsequence "$ungrouped_regular_tsv" "$ungrouped_tsv" ||
    ! contains_line_subsequence "$ungrouped_tsv" "$ungrouped_stdout"; then
     echo "FAIL: -u output did not preserve regular rows in the TSV and stdout" >&2
-    exit 92
+    exit 93
 fi
 if ! grep -Fqx "Specified BAM has 2 read groups" "$ungrouped_log" ||
    ! grep -Fqx -- \
-       "-u enabled: retaining declared read groups and appending one ungrouped whole-BAM result" \
+       "-u enabled: retaining declared read groups and appending one combined declared-read-group result" \
        "$ungrouped_log"; then
     echo "FAIL: -u did not inspect and report the BAM read-group header" >&2
-    exit 93
+    exit 94
+fi
+if ! grep -Fq "can't find RG tag for read" "$ungrouped_log" ||
+   ! grep -Fq "RG tag {undeclared}" "$ungrouped_log"; then
+    echo "FAIL: -u did not reject missing and undeclared RG tags" >&2
+    exit 95
 fi
 
 ungrouped_parallel_tsv="$test_dir/ungrouped-parallel-result.tsv"
 if ! "$new_telseq" -u -t 4 \
     --output-tsv "$ungrouped_parallel_tsv" \
     --output-log "$test_dir/ungrouped-parallel-result.log" \
-    "$merged_bam" >"$test_dir/ungrouped-parallel-result.stdout" \
+    "$ungrouped_bam" >"$test_dir/ungrouped-parallel-result.stdout" \
     2>"$test_dir/ungrouped-parallel-result.stderr"; then
-    echo "FAIL[94]: parallel ungrouped read-group execution failed" >&2
-    exit 94
+    echo "FAIL[96]: parallel combined read-group execution failed" >&2
+    exit 96
 fi
 if ! cmp -s "$ungrouped_tsv" "$ungrouped_parallel_tsv"; then
     echo "FAIL: serial and parallel -u result tables differ" >&2
-    exit 95
+    exit 97
 fi
 
 legacy_tsv="$test_dir/legacy-o-result.tsv"
